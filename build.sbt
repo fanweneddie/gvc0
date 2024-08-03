@@ -19,7 +19,9 @@ lazy val gvc = (project in file("."))
   )
   .dependsOn(silicon)
 Compile / run / fork := true
-Compile / run / javaOptions += "-Xss15m"
+// enlarge the stack size to avoid stack overflow when verifying cparser
+//Compile / run / javaOptions += "-Xss15m"
+Compile / run / javaOptions += "-Xss500m"
 assembly / assemblyMergeStrategy := {
   case PathList("META-INF", xs @ _*) => MergeStrategy.discard
   case x                             => MergeStrategy.first

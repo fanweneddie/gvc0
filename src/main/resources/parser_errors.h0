@@ -1,0 +1,40 @@
+void stringlist_error();
+
+void token_match_error();
+
+void node_kind_error();
+void node_binop_error();
+void node_neg_error();
+void node_deref_error(bool errorty);
+void node_stmt_error();
+
+
+void parser_error();
+void no_progress_error();
+void scope_error();
+
+void num_op_error();
+void undef_variable_error();
+
+void func_impdecl_error();
+void func_error();
+void func_args_error(bool option);
+void func_as_arg_error();
+void func_name_error();
+void func_redecl_error();
+void func_redef_error();
+
+void expr_error();
+
+void var_decl_void_error();
+void var_type_error();
+void var_name_error();
+
+void storage_type_error();
+void storage_type_unsupported_error();
+void structs_enums_unsupported_error();
+void type_error();
+void tydef_name_error();
+
+void param_name_error();
+void param_type_error();

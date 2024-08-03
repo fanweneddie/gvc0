@@ -1,0 +1,108 @@
+void stringlist_error() {
+  error("Adding char to string list that's NULL");
+}
+
+void token_match_error() {
+  error("Token does not match expected op");
+}
+
+void node_kind_error() {
+  error("node without a kind");
+}
+void node_binop_error() {
+  error("binary op on different types");
+}
+void node_neg_error() {
+  error("NEG not supported for non-int types");
+}
+void node_deref_error(bool errorty) {
+  if (errorty) {
+    error("invalid pointer dereference");
+  } else {
+    error("dereferencing a void pointer");
+  }
+}
+void node_stmt_error() {
+  error("statement expression returning void is not supported");
+}
+
+void parser_error() {
+  error("internal parser error");
+}
+void no_progress_error() {
+  error("unknown/unexpected token found");
+}
+void scope_error() {
+  error("Can't add to NULL map pointer");
+}
+
+void num_op_error() {
+  error("invalid operands");
+}
+void undef_variable_error() {
+  error("undefined variable");
+}
+
+void func_impdecl_error() {
+  error("implicit declaration of a function");
+}
+void func_error() {
+  error("not a function");
+}
+void func_args_error(bool option) {
+  if (option) {
+    error("too many args");
+  } else {
+    error("too few arguments");
+  }
+}
+void func_as_arg_error() {
+  error("functions are not allowed to take other functions as arguments");
+}
+void func_name_error() {
+  error("function name omitted");
+}
+void func_redecl_error() {
+  error("redeclared as a different kind of symbol");
+}
+void func_redef_error() {
+  error("redefinition of function");
+}
+
+void expr_error() {
+  error("expected an expression");
+}
+
+void var_decl_void_error() {
+  error("variable declared void");
+}
+void var_name_error() {
+  error("variable name omitted");
+}
+void var_type_error() {
+  error("variable has incomplete type");
+}
+
+void storage_type_error() {
+  error("storage class specifier is not allowed in this context");
+}
+void storage_type_unsupported_error() {
+  error("static, extern, and inline not supported");
+}
+void structs_enums_unsupported_error() {
+  error("structs and enums not supported");
+}
+void type_error() {
+  error("invalid type");
+}
+void tydef_name_error() {
+  error("typedef name omitted");
+}
+
+void param_name_error() {
+  error("parameter name omitted");
+}
+void param_type_error() {
+  error("param without a type");
+}
+

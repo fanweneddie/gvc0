@@ -1,0 +1,3359 @@
+// This is the most recent cparser file, copied from
+// https://github.com/gradual-verification/gvc0-cparser-case-study/blob/main/verification-data/journal-entry-35-100323-0223-100323-0635/cparser-2023-10-04T02%3A10%3A53.288129/cparser.c0
+
+#use <conio>
+#use <parser_errors>
+
+//------------StringList--------------------------------------------------------------------------------
+/* Public Interface */
+typedef struct StringList StringList;
+
+StringList *new_stringlist();
+void add_char(StringList *s, char c);
+bool equals(StringList *s1, StringList *s2);
+int get_len(StringList *s);
+
+/* Private Implementation */
+typedef struct CharNode CharNode;
+struct CharNode {
+  char val;
+  CharNode *next;
+};
+
+struct StringList {
+  CharNode *root;
+  int len;
+};
+
+StringList *new_stringlist() {
+  StringList *s = alloc(struct StringList);
+  CharNode *r = alloc(struct CharNode);
+  r->val = '\0';
+  r->next = NULL;
+  s->root = r;
+  s->len = 0;
+  return s;
+}
+
+void add_char(StringList *s, char c) {
+  if (s == NULL) {
+    stringlist_error();
+  } else if (s->root == NULL) {
+    CharNode *end = alloc(struct CharNode);
+    end->val = '\0';
+    end->next = NULL;
+    CharNode *cnode = alloc(struct CharNode);
+    cnode->val = c;
+    cnode->next = end;
+    s->root = cnode;
+    s->len = 1;
+  } else if (s->root->next == NULL) {
+    CharNode *cnode = alloc(struct CharNode);
+    cnode->val = c;
+    cnode->next = s->root;
+    s->root = cnode;
+    s->len = 1;
+  } else {
+      CharNode *prev = s->root;
+      CharNode *r = s->root;
+      while (r->next != NULL) {
+        prev = r;
+        r = r->next;
+      }
+      CharNode *cnode = alloc(struct CharNode);
+      cnode->val = c;
+      cnode->next = r;
+      prev->next = cnode;
+      s->len = s->len + 1;
+  }
+}
+
+bool equals(StringList *s1, StringList *s2) {
+  if (s1 != NULL &&
+      s2 != NULL &&
+      s1->root != NULL &&
+      s2->root != NULL &&
+      s1->len == s2->len) {
+    int ln = s2->len;
+    int i;
+    CharNode *c1 = s1->root;
+    CharNode *c2 = s2->root;
+    bool eq = true;
+    for (i = 0; i < ln; i = i + 1) {
+      eq = eq && c1->val == c2->val;
+      c1 = c1->next;
+      c2 = c2->next;
+    }
+    eq = eq && c1->val == '\0';
+    eq = eq && c2->val == '\0';
+    return eq;
+  }
+  return false;
+}
+
+int get_len(StringList *s) {
+  if (s != NULL) {
+    return s->len;
+  } else {
+    return -1;
+  }
+}
+
+//-------------Token-----------------------------------------------------------------------------------
+typedef struct Type Type;
+
+/* Public Interface */
+typedef struct Token Token;
+typedef struct TokenKind TokenKind;
+
+struct Token {
+  TokenKind *kind;
+  Token *next;
+  Type *ty;
+  StringList *str;
+};
+
+//@ predicate tokenListSeg(Token *strt, Token *end);
+//@ predicate tokenList(Token *tok) = tokenListSeg(tok, NULL);
+//@ predicate tokenKind(TokenKind *knd);
+/*@ predicate tokenListSeg(Token *strt, Token *end) =
+  (strt == end) ?
+    true
+    :
+    acc(strt->kind) && tokenKind(strt->kind) && acc(strt->ty) && acc(strt->str) &&
+    acc(strt->next) && tokenListSeg(strt->next, end);
+@*/
+
+// ? should contain some predicate for the EOF comparison with str
+// StringList lib needs to have/supply this predicate, but it doesn't
+// ? should also contain some predicate for permissions to kind and checking the kind of EOF
+// and probably that ty == null
+/*@ predicate endOfFile(Token *tok) =
+  ? && acc(tok->kind) && acc(tok->ty) && acc(tok->str) &&
+  acc(tok->next) && tok->next == NULL;
+@*/
+
+void gv_tokenlistseg_lemma(Token *a, Token *b, Token *c)
+//@ requires tokenListSeg(a,b) && tokenListSeg(b,c) && tokenListSeg(c,NULL) && b != c;
+//@ ensures tokenListSeg(a,b) && tokenListSeg(b,c) && tokenListSeg(c,NULL) && a != c;
+{
+  if (a == b) {
+  } else {
+    //@ unfold tokenListSeg(a,b);
+    gv_tokenlistseg_lemma(a->next,b,c);
+    if (c == NULL) {
+      //@ fold tokenListSeg(a,b);
+    } else {
+      //@ unfold tokenListSeg(c,NULL);
+      //@ assert a != c;
+      //@ fold tokenListSeg(c,NULL);
+      //@ fold tokenListSeg(a,b);
+    }
+  }
+}
+
+void gv_tokenlistseg_lemma2(Token *a, Token *b, Token *c)
+//@ requires tokenListSeg(a,b) && tokenListSeg(b,c) && tokenListSeg(c,NULL) && a != b;
+//@ ensures tokenListSeg(a,c) && tokenListSeg(c,NULL) && a != c;
+{
+  //@ unfold tokenListSeg(a,b);
+  // have tokenListSeg(a->next,b)
+  if (a->next == b) {
+    if (c == NULL) {
+      //@ fold tokenListSeg(a,c);
+    } else {
+      //@ unfold tokenListSeg(c,NULL);
+      //@ assert a != c;
+      //@ fold tokenListSeg(c,NULL);
+      //@ fold tokenListSeg(a,c);
+    }
+  } else {
+    gv_tokenlistseg_lemma2(a->next,b,c);
+    if (c == NULL) {
+      //@ fold tokenListSeg(a,c);
+    } else {
+      //@ unfold tokenListSeg(c,NULL);
+      //@ assert a != c;
+      //@ fold tokenListSeg(c,NULL);
+      //@ fold tokenListSeg(a,c);
+    }
+  }
+}
+
+void gv_tokenlistseg_append_lemma(Token *a, Token *b, Token *c)
+//@ requires tokenListSeg(a,b) && tokenListSeg(b,c);
+//@ ensures tokenListSeg(a,c);
+{
+  if (a == b) {
+  } else {
+    //@ unfold tokenListSeg(a,b);
+    gv_tokenlistseg_append_lemma(a->next,b,c);
+    //@ fold tokenListSeg(a,c);
+  }
+}
+
+bool is_IDENT(Token *t);
+bool is_PUNCT(Token *t);
+bool is_KEYWORD(Token *t);
+bool is_STR(Token *t);
+bool is_NUM(Token *t);
+bool is_PP_NUM(Token *t);
+bool is_EOF(Token *t);
+
+TokenKind *new_TK_IDENT();
+TokenKind *new_TK_PUNCT();
+TokenKind *new_TK_KEYWORD();
+TokenKind *new_TK_STR();
+TokenKind *new_TK_NUM();
+TokenKind *new_TK_PP_NUM();
+TokenKind *new_TK_EOF();
+
+bool equal(Token *tok, StringList *op);
+Token *skip(Token *tok, StringList *op);
+bool consume(Token **rest, Token *tok, StringList *str);
+Token *new_token(TokenKind *kind, StringList *str);
+StringList *tok_name(Token *tok);
+
+/* Private Implementation */
+struct TokenKind {
+  int kind;
+};
+//@ predicate tokenKind(TokenKind *knd) = acc(knd->kind);
+//@ predicate tfalse() = false;
+void gv_tok_unreachable()
+//@ requires ?;
+//@ ensures false;
+{
+  //@ unfold tfalse();
+}
+
+bool is_IDENT(Token *t) {
+  if (t != NULL && t->kind != NULL)
+    return t->kind->kind == 1;
+  else
+    return false;
+}
+bool is_PUNCT(Token *t) {
+  if (t != NULL && t->kind != NULL)
+    return t->kind->kind == 2;
+  else
+    return false;
+}
+bool is_KEYWORD(Token *t) {
+  if (t != NULL && t->kind != NULL)
+    return t->kind->kind == 3;
+  else
+    return false;
+}
+bool is_STR(Token *t) {
+  if (t != NULL && t->kind != NULL)
+    return t->kind->kind == 4;
+  else
+    return false;
+}
+bool is_NUM(Token *t) {
+  if (t != NULL && t->kind != NULL)
+    return t->kind->kind == 5;
+  else
+    return false;
+}
+bool is_PP_NUM(Token *t) {
+  if (t != NULL && t->kind != NULL)
+    return t->kind->kind == 6;
+  else
+    return false;
+}
+bool is_EOF(Token *t) {
+  if (t != NULL && t->kind != NULL)
+    return t->kind->kind == 7;
+  else
+    return false;
+}
+
+TokenKind *new_TK_IDENT() {
+  TokenKind *tk = alloc(struct TokenKind);
+  tk->kind = 1;
+  return tk;
+}
+TokenKind *new_TK_PUNCT() {
+  TokenKind *tk = alloc(struct TokenKind);
+  tk->kind = 2;
+  return tk;
+}
+TokenKind *new_TK_KEYWORD() {
+  TokenKind *tk = alloc(struct TokenKind);
+  tk->kind = 3;
+  return tk;
+}
+TokenKind *new_TK_STR() {
+  TokenKind *tk = alloc(struct TokenKind);
+  tk->kind = 4;
+  return tk;
+}
+TokenKind *new_TK_NUM() {
+  TokenKind *tk = alloc(struct TokenKind);
+  tk->kind = 5;
+  return tk;
+}
+TokenKind *new_TK_PP_NUM() {
+  TokenKind *tk = alloc(struct TokenKind);
+  tk->kind = 6;
+  return tk;
+}
+TokenKind *new_TK_EOF() {
+  TokenKind *tk = alloc(struct TokenKind);
+  tk->kind = 7;
+  return tk;
+}
+
+Token *new_token(TokenKind *kind, StringList *contents) {
+  Token *tok = alloc(struct Token);
+  tok->kind = kind;
+  tok->str = contents;
+  return tok;
+}
+
+bool equal(Token *tok, StringList *op)
+//@ requires ? && tok != NULL;
+//@ ensures ? && tok != NULL;
+{
+  return equals(tok->str, op);
+}
+
+Token *skip(Token *tok, StringList *op)
+//@ requires ? ;//&& tokenListSeg(tok,NULL);
+//@ ensures ? && tokenListSeg(tok,\result) && tokenListSeg(\result,NULL) && tok != \result;
+{
+  if (!equal(tok, op)) {
+    token_match_error();
+    gv_tok_unreachable();
+  }
+  //@ unfold tokenListSeg(tok,NULL);
+  Token *tokres = tok->next;
+  //@ unfold tokenListSeg(tokres,NULL);
+  //@ assert tok != tokres;
+  //@ fold tokenListSeg(tokres,NULL);
+  if (tokres == NULL) {
+    //@ fold tokenListSeg(tok,tokres);
+    //@ fold tokenListSeg(tokres,tokres);
+  } else {
+    //@ fold tokenListSeg(tokres,tokres);
+    //@ fold tokenListSeg(tok,tokres);
+  }
+  return tokres;
+}
+
+bool consume(Token **rest, Token *tok, StringList *str) {
+  if (equal(tok, str)) {
+    *rest = tok->next;
+    return true;
+  }
+  *rest = tok;
+  return false;
+}
+
+StringList *tok_name(Token *tok) {
+  if (tok == NULL) {
+    return NULL;
+  } else {
+    return tok->str;
+  }
+}
+
+//--------------Type---------------------------------------------------------------------------------------
+
+/* Public Interface */
+typedef struct TypeKind TypeKind;
+
+struct Type {
+  TypeKind *kind;
+  int size;
+  int align;
+  bool is_unsigned;
+  Type *origin;
+
+  Type *base;
+
+  Token *name;
+  Token *name_pos;
+
+  Type *return_ty;
+  Type *params;
+  Type *next;
+};
+
+bool is_VOID(Type *ty);
+bool is_BOOL(Type *ty);
+bool is_CHAR(Type *ty);
+bool is_SHORT(Type *ty);
+bool is_INT(Type *ty);
+bool is_LONG(Type *ty);
+bool is_FLOAT(Type *ty);
+bool is_DOUBLE(Type *ty);
+bool is_LDOUBLE(Type *ty);
+bool is_ENUM(Type *ty);
+bool is_PTR(Type *ty);
+bool is_FUNC(Type *ty);
+bool is_STRUCT(Type *ty);
+
+TypeKind *new_TY_VOID();
+TypeKind *new_TY_BOOL();
+TypeKind *new_TY_CHAR();
+TypeKind *new_TY_SHORT();
+TypeKind *new_TY_INT();
+TypeKind *new_TY_LONG();
+TypeKind *new_TY_FLOAT();
+TypeKind *new_TY_DOUBLE();
+TypeKind *new_TY_LDOUBLE();
+TypeKind *new_TY_ENUM();
+TypeKind *new_TY_PTR();
+TypeKind *new_TY_FUNC();
+TypeKind *new_TY_STRUCT();
+
+Type *new_type(TypeKind *kind, int size, int align);
+Type *empty_type();
+
+Type *new_ty_void();
+Type *new_ty_bool();
+
+Type *new_ty_char();
+Type *new_ty_short();
+Type *new_ty_int();
+Type *new_ty_long();
+
+Type *new_ty_uchar();
+Type *new_ty_ushort();
+Type *new_ty_uint();
+Type *new_ty_ulong();
+
+Type *new_ty_float();
+Type *new_ty_double();
+Type *new_ty_ldouble();
+
+Type *enum_type();
+Type *struct_type();
+Type *func_type(Type *return_ty);
+Type *pointer_to(Type *base);
+Type *copy_type(Type *ty);
+bool is_numeric(Type *ty);
+bool same_typekind(Type *ty1, Type *ty2);
+
+StringList *ty_name(Type* ty);
+
+/* Private Implementation */
+struct TypeKind {
+  int kind;
+};
+
+bool is_VOID(Type *ty) {
+  if (ty != NULL && ty->kind != NULL)
+    return ty->kind->kind == 1;
+  else
+    return false;
+}
+bool is_BOOL(Type *ty) {
+  if (ty != NULL && ty->kind != NULL)
+    return ty->kind->kind == 2;
+  else
+    return false;
+}
+bool is_CHAR(Type *ty) {
+  if (ty != NULL && ty->kind != NULL)
+    return ty->kind->kind == 3;
+  else
+    return false;
+}
+bool is_SHORT(Type *ty) {
+  if (ty != NULL && ty->kind != NULL)
+    return ty->kind->kind == 4;
+  else
+    return false;
+}
+bool is_INT(Type *ty) {
+  if (ty != NULL && ty->kind != NULL)
+    return ty->kind->kind == 5;
+  else
+    return false;
+}
+bool is_LONG(Type *ty) {
+  if (ty != NULL && ty->kind != NULL)
+    return ty->kind->kind == 6;
+  else
+    return false;
+}
+bool is_FLOAT(Type *ty) {
+  if (ty != NULL && ty->kind != NULL)
+    return ty->kind->kind == 7;
+  else
+    return false;
+}
+bool is_DOUBLE(Type *ty) {
+  if (ty != NULL && ty->kind != NULL)
+    return ty->kind->kind == 8;
+  else
+    return false;
+}
+bool is_LDOUBLE(Type *ty) {
+  if (ty != NULL && ty->kind != NULL)
+    return ty->kind->kind == 9;
+  else
+    return false;
+}
+bool is_ENUM(Type *ty) {
+  if (ty != NULL && ty->kind != NULL)
+    return ty->kind->kind == 10;
+  else
+    return false;
+}
+bool is_PTR(Type *ty) {
+  if (ty != NULL && ty->kind != NULL)
+    return ty->kind->kind == 11;
+  else
+    return false;
+}
+bool is_FUNC(Type *ty) {
+  if (ty != NULL && ty->kind != NULL)
+    return ty->kind->kind == 12;
+  else
+    return false;
+}
+bool is_STRUCT(Type *ty) {
+  if (ty != NULL && ty->kind != NULL)
+    return ty->kind->kind == 13;
+  else
+    return false;
+}
+
+TypeKind *new_TY_VOID() {
+  TypeKind *ty = alloc(struct TypeKind);
+  ty->kind = 1;
+  return ty;
+}
+TypeKind *new_TY_BOOL() {
+  TypeKind *ty = alloc(struct TypeKind);
+  ty->kind = 2;
+  return ty;
+}
+TypeKind *new_TY_CHAR() {
+  TypeKind *ty = alloc(struct TypeKind);
+  ty->kind = 3;
+  return ty;
+}
+TypeKind *new_TY_SHORT() {
+  TypeKind *ty = alloc(struct TypeKind);
+  ty->kind = 4;
+  return ty;
+}
+TypeKind *new_TY_INT() {
+  TypeKind *ty = alloc(struct TypeKind);
+  ty->kind = 5;
+  return ty;
+}
+TypeKind *new_TY_LONG() {
+  TypeKind *ty = alloc(struct TypeKind);
+  ty->kind = 6;
+  return ty;
+}
+TypeKind *new_TY_FLOAT() {
+  TypeKind *ty = alloc(struct TypeKind);
+  ty->kind = 7;
+  return ty;
+}
+TypeKind *new_TY_DOUBLE() {
+  TypeKind *ty = alloc(struct TypeKind);
+  ty->kind = 8;
+  return ty;
+}
+TypeKind *new_TY_LDOUBLE() {
+  TypeKind *ty = alloc(struct TypeKind);
+  ty->kind = 9;
+  return ty;
+}
+TypeKind *new_TY_ENUM() {
+  TypeKind *ty = alloc(struct TypeKind);
+  ty->kind = 10;
+  return ty;
+}
+TypeKind *new_TY_PTR() {
+  TypeKind *ty = alloc(struct TypeKind);
+  ty->kind = 11;
+  return ty;
+}
+TypeKind *new_TY_FUNC() {
+  TypeKind *ty = alloc(struct TypeKind);
+  ty->kind = 12;
+  return ty;
+}
+TypeKind *new_TY_STRUCT() {
+  TypeKind *ty = alloc(struct TypeKind);
+  ty->kind = 13;
+  return ty;
+}
+
+bool same_typekind(Type *ty1, Type *ty2) {
+  if (ty1 == NULL       || ty2 == NULL ||
+      ty1->kind == NULL || ty2->kind == NULL
+     )
+  {
+    return false;
+  } else {
+    return ty1->kind->kind == ty2->kind->kind;
+  }
+}
+
+Type *new_type(TypeKind *kind, int size, int align) {
+  Type *ty = alloc(struct Type);
+  ty->kind = kind;
+  ty->size = size;
+  ty->align = align;
+  return ty;
+}
+Type *empty_type() {
+  Type *ty = alloc(struct Type);
+  return ty;
+}
+
+Type *new_ty_void() {
+  return new_type(new_TY_VOID(),1,1);
+}
+Type *new_ty_bool() {
+  return new_type(new_TY_BOOL(),1,1);
+}
+
+Type *new_ty_char() {
+  return new_type(new_TY_CHAR(),1,1);
+}
+Type *new_ty_short() {
+  return new_type(new_TY_SHORT(),2,2);
+}
+Type *new_ty_int() {
+  return new_type(new_TY_INT(),4,4);
+}
+Type *new_ty_long() {
+  return new_type(new_TY_LONG(),8,8);
+}
+
+Type *new_ty_uchar() {
+  Type *ty = new_type(new_TY_CHAR(),1,1);
+  ty->is_unsigned = true;
+  return ty;
+}
+Type *new_ty_ushort() {
+  Type *ty = new_type(new_TY_SHORT(),2,2);
+  ty->is_unsigned = true;
+  return ty;
+}
+Type *new_ty_uint() {
+  Type *ty = new_type(new_TY_INT(),4,4);
+  ty->is_unsigned = true;
+  return ty;
+}
+Type *new_ty_ulong() {
+  Type *ty = new_type(new_TY_LONG(),8,8);
+  ty->is_unsigned = true;
+  return ty;
+}
+
+Type *new_ty_float() {
+  return new_type(new_TY_FLOAT(),4,4);
+}
+Type *new_ty_double() {
+  return new_type(new_TY_DOUBLE(),8,8);
+}
+Type *new_ty_ldouble() {
+  return new_type(new_TY_LDOUBLE(),16,16);
+}
+Type *pointer_to(Type *base) {
+  Type *ty = new_type(new_TY_PTR(), 8, 8);
+  ty->base = base;
+  ty->is_unsigned = true;
+  return ty;
+}
+
+Type *enum_type() {
+  return new_type(new_TY_ENUM(),4,4);
+}
+Type *struct_type() {
+  return new_type(new_TY_STRUCT(),0,1);
+}
+Type *func_type(Type *return_ty) {
+  Type *ty = new_type(new_TY_FUNC(),1,1);
+  ty->return_ty = return_ty;
+  return ty;
+}
+Type *copy_type(Type *ty) {
+  Type *ret = alloc(Type);
+  ret->kind = ty->kind;
+  ret->size = ty->size;
+  ret->align = ty->align;
+  ret->is_unsigned = ty->is_unsigned;
+  ret->origin = ty;
+  ret->base = ty->base;
+  ret->name = ty->name;
+  ret->name_pos = ty->name_pos;
+  ret->return_ty = ty->return_ty;
+  ret->params = ty->params;
+  ret->next = ty->next;
+  return ret;
+}
+bool is_numeric(Type *ty) {
+  return is_INT(ty)   || is_BOOL(ty)   || is_CHAR(ty) ||
+         is_SHORT(ty) || is_LONG(ty)   || is_ENUM(ty) ||
+         is_FLOAT(ty) || is_DOUBLE(ty) || is_LDOUBLE(ty);
+}
+
+StringList *ty_name(Type *ty) {
+  if (ty != NULL) {
+    return tok_name(ty->name);
+  } else {
+    return NULL;
+  }
+}
+
+//-------------Object-----------------------------------------------------------------------------------
+
+typedef struct ASTNode ASTNode;
+
+/* Public Interface */
+
+typedef struct Obj Obj;
+struct Obj {
+  Obj *next;
+  StringList *name;
+  Type *ty;
+  Token *tok;
+  bool is_local;
+  int align;
+
+  int offset;
+
+  bool is_function;
+  bool is_definition;
+
+  Obj *params;
+  ASTNode *body;
+  Obj *locals;
+  int stack_size;
+};
+
+/* Private Implementation */
+
+//-------------ASTNode-------------------------------------------------------------------------------------
+
+/* Public Interface */
+typedef struct NodeKind NodeKind;
+
+struct ASTNode {
+  NodeKind *kind;
+  ASTNode *next;
+  Type *ty;
+  Token *tok;
+
+  ASTNode *lhs;
+  ASTNode *rhs;
+
+  ASTNode *cond;
+  ASTNode *then;
+  ASTNode *els;
+  ASTNode *init;
+  ASTNode *inc;
+
+  ASTNode *body;
+
+  Type *func_ty;
+  ASTNode *args;
+  bool pass_by_stack;
+
+  Obj *var;
+
+  StringList *val;
+};
+
+NodeKind *new_ND_NULL_EXPR();
+NodeKind *new_ND_ADD();
+NodeKind *new_ND_SUB();
+NodeKind *new_ND_MUL();
+NodeKind *new_ND_DIV();
+NodeKind *new_ND_NEG();
+NodeKind *new_ND_MOD();
+NodeKind *new_ND_BITAND();
+NodeKind *new_ND_BITOR();
+NodeKind *new_ND_BITXOR();
+NodeKind *new_ND_SHL();
+NodeKind *new_ND_SHR();
+NodeKind *new_ND_EQ();
+NodeKind *new_ND_NE();
+NodeKind *new_ND_LT();
+NodeKind *new_ND_LE();
+NodeKind *new_ND_ASSIGN();
+NodeKind *new_ND_COMMA();
+NodeKind *new_ND_ADDR();
+NodeKind *new_ND_DEREF();
+NodeKind *new_ND_NOT();
+NodeKind *new_ND_BITNOT();
+NodeKind *new_ND_LOGAND();
+NodeKind *new_ND_LOGOR();
+NodeKind *new_ND_RETURN();
+NodeKind *new_ND_IF();
+NodeKind *new_ND_FOR();
+NodeKind *new_ND_BLOCK();
+NodeKind *new_ND_FUNCALL();
+NodeKind *new_ND_EXPR_STMT();
+NodeKind *new_ND_STMT_EXPR();
+NodeKind *new_ND_VAR();
+NodeKind *new_ND_NUM();
+NodeKind *new_ND_MEMZERO();
+
+ASTNode *new_node(NodeKind *kind, Token *tok);
+ASTNode *new_binary(NodeKind *kind, ASTNode *lhsn, ASTNode *rhsn, Token *tok);
+ASTNode *new_unary(NodeKind *kind, ASTNode *e, Token *tok);
+ASTNode *empty_node();
+void add_type(ASTNode *node);
+
+/* Private Implementation */
+struct NodeKind {
+  int kind;
+};
+
+NodeKind *new_ND_NULL_EXPR() {
+  NodeKind *knd = alloc(NodeKind);
+  knd->kind = 1;
+  return knd;
+}
+NodeKind *new_ND_ADD() {
+  NodeKind *knd = alloc(NodeKind);
+  knd->kind = 2;
+  return knd;
+}
+NodeKind *new_ND_SUB(){
+  NodeKind *knd = alloc(NodeKind);
+  knd->kind = 3;
+  return knd;
+}
+NodeKind *new_ND_MUL() {
+  NodeKind *knd = alloc(NodeKind);
+  knd->kind = 4;
+  return knd;
+}
+NodeKind *new_ND_DIV(){
+  NodeKind *knd = alloc(NodeKind);
+  knd->kind = 5;
+  return knd;
+}
+NodeKind *new_ND_NEG() {
+  NodeKind *knd = alloc(NodeKind);
+  knd->kind = 6;
+  return knd;
+}
+NodeKind *new_ND_MOD() {
+  NodeKind *knd = alloc(NodeKind);
+  knd->kind = 7;
+  return knd;
+}
+NodeKind *new_ND_BITAND() {
+  NodeKind *knd = alloc(NodeKind);
+  knd->kind = 8;
+  return knd;
+}
+NodeKind *new_ND_BITOR() {
+  NodeKind *knd = alloc(NodeKind);
+  knd->kind = 9;
+  return knd;
+}
+NodeKind *new_ND_BITXOR() {
+  NodeKind *knd = alloc(NodeKind);
+  knd->kind = 10;
+  return knd;
+}
+NodeKind *new_ND_SHL(){
+  NodeKind *knd = alloc(NodeKind);
+  knd->kind = 11;
+  return knd;
+}
+NodeKind *new_ND_SHR() {
+  NodeKind *knd = alloc(NodeKind);
+  knd->kind = 12;
+  return knd;
+}
+NodeKind *new_ND_EQ() {
+  NodeKind *knd = alloc(NodeKind);
+  knd->kind = 13;
+  return knd;
+}
+NodeKind *new_ND_NE() {
+  NodeKind *knd = alloc(NodeKind);
+  knd->kind = 14;
+  return knd;
+}
+NodeKind *new_ND_LT() {
+  NodeKind *knd = alloc(NodeKind);
+  knd->kind = 15;
+  return knd;
+}
+NodeKind *new_ND_LE() {
+  NodeKind *knd = alloc(NodeKind);
+  knd->kind = 16;
+  return knd;
+}
+NodeKind *new_ND_ASSIGN() {
+  NodeKind *knd = alloc(NodeKind);
+  knd->kind = 17;
+  return knd;
+}
+NodeKind *new_ND_COMMA() {
+  NodeKind *knd = alloc(NodeKind);
+  knd->kind = 18;
+  return knd;
+}
+NodeKind *new_ND_ADDR() {
+  NodeKind *knd = alloc(NodeKind);
+  knd->kind = 19;
+  return knd;
+}
+NodeKind *new_ND_DEREF() {
+  NodeKind *knd = alloc(NodeKind);
+  knd->kind = 20;
+  return knd;
+}
+NodeKind *new_ND_NOT() {
+  NodeKind *knd = alloc(NodeKind);
+  knd->kind = 21;
+  return knd;
+}
+NodeKind *new_ND_BITNOT() {
+  NodeKind *knd = alloc(NodeKind);
+  knd->kind = 22;
+  return knd;
+}
+NodeKind *new_ND_LOGAND() {
+  NodeKind *knd = alloc(NodeKind);
+  knd->kind = 23;
+  return knd;
+}
+NodeKind *new_ND_LOGOR() {
+  NodeKind *knd = alloc(NodeKind);
+  knd->kind = 24;
+  return knd;
+}
+NodeKind *new_ND_RETURN() {
+  NodeKind *knd = alloc(NodeKind);
+  knd->kind = 25;
+  return knd;
+}
+NodeKind *new_ND_IF() {
+  NodeKind *knd = alloc(NodeKind);
+  knd->kind = 26;
+  return knd;
+}
+NodeKind *new_ND_FOR() {
+  NodeKind *knd = alloc(NodeKind);
+  knd->kind = 27;
+  return knd;
+}
+NodeKind *new_ND_BLOCK() {
+  NodeKind *knd = alloc(NodeKind);
+  knd->kind = 28;
+  return knd;
+}
+NodeKind *new_ND_FUNCALL() {
+  NodeKind *knd = alloc(NodeKind);
+  knd->kind = 29;
+  return knd;
+}
+NodeKind *new_ND_EXPR_STMT() {
+  NodeKind *knd = alloc(NodeKind);
+  knd->kind = 30;
+  return knd;
+}
+NodeKind *new_ND_STMT_EXPR() {
+  NodeKind *knd = alloc(NodeKind);
+  knd->kind = 31;
+  return knd;
+}
+NodeKind *new_ND_VAR() {
+  NodeKind *knd = alloc(NodeKind);
+  knd->kind = 32;
+  return knd;
+}
+NodeKind *new_ND_NUM() {
+  NodeKind *knd = alloc(NodeKind);
+  knd->kind = 33;
+  return knd;
+}
+NodeKind *new_ND_MEMZERO() {
+  NodeKind *knd = alloc(NodeKind);
+  knd->kind = 34;
+  return knd;
+}
+
+ASTNode *new_node(NodeKind *kind, Token *tok) {
+  ASTNode *node = alloc(ASTNode);
+  node->kind = kind;
+  node->tok = tok;
+  return node;
+}
+ASTNode *empty_node() {
+  ASTNode *node = alloc(ASTNode);
+  return node;
+}
+ASTNode *new_binary(NodeKind *kind, ASTNode *lhsn, ASTNode *rhsn, Token *tok) {
+  ASTNode *node = new_node(kind, tok);
+  node->lhs = lhsn;
+  node->rhs = rhsn;
+  return node;
+}
+ASTNode *new_unary(NodeKind *kind, ASTNode *e, Token *tok) {
+  ASTNode *node = new_node(kind, tok);
+  node->lhs = e;
+  return node;
+}
+
+void add_type(ASTNode *node) {
+
+  if (node == NULL || node->ty != NULL) {
+  } else {
+
+    add_type(node->lhs);
+    add_type(node->rhs);
+    add_type(node->cond);
+    add_type(node->then);
+    add_type(node->els);
+    add_type(node->init);
+    add_type(node->inc);
+
+    for (ASTNode *n = node->body; n != NULL; n = n->next)
+      add_type(n);
+    for (ASTNode *n = node->args; n != NULL; n = n->next)
+      add_type(n);
+
+    if (node->kind == NULL)
+      node_kind_error();
+
+    if (node->kind->kind == 33) {
+      node->ty = new_ty_int();
+    } else if (node->kind->kind == 2 ||
+               node->kind->kind == 3 ||
+               node->kind->kind == 4 ||
+               node->kind->kind == 5 ||
+               node->kind->kind == 7 ||
+               node->kind->kind == 8 ||
+               node->kind->kind == 9 ||
+               node->kind->kind == 10
+              ) {
+      if (same_typekind(node->lhs->ty, node->rhs->ty)) {
+        node->ty = node->lhs->ty;
+      } else {
+        node_binop_error();
+      }
+    } else if (node->kind->kind == 6) {
+      if (is_INT(node->lhs->ty))
+        node->ty = node->lhs->ty;
+      else
+        node_neg_error();
+    } else if (node->kind->kind == 17) {
+      node->ty = node->lhs->ty;
+    } else if (node->kind->kind == 13 ||
+               node->kind->kind == 14 ||
+               node->kind->kind == 15 ||
+               node->kind->kind == 16
+              ) {
+      node->ty = new_ty_int();
+    } else if (node->kind->kind == 29) {
+      node->ty = node->func_ty->return_ty;
+    } else if (node->kind->kind == 21 ||
+               node->kind->kind == 24 ||
+               node->kind->kind == 23
+              ) {
+      node->ty = new_ty_int();
+    } else if (node->kind->kind == 22 ||
+               node->kind->kind == 11 ||
+               node->kind->kind == 12
+              ) {
+      node->ty = node->lhs->ty;
+    } else if (node->kind->kind == 32) {
+      node->ty = node->var->ty;
+    } else if (node->kind->kind == 18) {
+      node->ty = node->rhs->ty;
+    } else if (node->kind->kind == 19) {
+      Type *ty = node->lhs->ty;
+      node->ty = pointer_to(ty);
+
+    } else if (node->kind->kind == 20) {
+      if (node->lhs->ty->base == NULL)
+        node_deref_error(true);
+      if (is_VOID(node->lhs->ty->base))
+        node_deref_error(false);
+      node->ty = node->lhs->ty->base;
+
+    } else if (node->kind->kind == 31) {
+      if (node->body != NULL) {
+        ASTNode *s = node->body;
+        while (s->next != NULL)
+          s = s->next;
+
+        if (s->kind == NULL)
+          node_kind_error();
+
+        if (s->kind->kind == 30) {
+          node->ty = s->lhs->ty;
+        }
+      } else {
+        node_stmt_error();
+      }
+    }
+  }
+}
+
+//-------------Parser--------------------------------------------------------------------------------------
+/* Public Interface */
+Obj *parse(Token *tok);
+
+/* Private Interface */
+typedef struct Scope Scope;
+typedef struct VarAttr VarAttr;
+
+VarAttr *new_attr();
+
+
+bool is_typename(Token *tok, Scope *scope);
+Type *declspec(Token **rest, Token *tok, Token *gv_tok, VarAttr *attr, Scope *scope);
+Type *type_suffix(Token **rest, Token *tok, Type *ty, Scope *scope);
+Type *declarator(Token **rest, Token *tok, Token *gv_tok, Type *ty, Scope *scope);
+ASTNode *declaration(Token **rest, Token *tok, Type *basety, VarAttr *attr, Scope **scope, Obj **locals);
+ASTNode *compound_stmt(Token **rest, Token *tok, Scope **scope, Obj **globals, Obj **locals);
+ASTNode *stmt(Token **rest, Token *tok, Scope **scope, Obj **globals, Obj **locals);
+ASTNode *expr_stmt(Token **rest, Token *tok, Scope *scope);
+ASTNode *expr(Token **rest, Token *tok, Scope *scope);
+ASTNode *assign(Token **rest, Token *tok, Scope *scope);
+ASTNode *logor(Token **rest, Token *tok, Scope *scope);
+ASTNode *logand(Token **rest, Token *tok, Scope *scope);
+ASTNode *bitor(Token **rest, Token *tok, Scope *scope);
+ASTNode *bitxor(Token **rest, Token *tok, Scope *scope);
+ASTNode *bitand(Token **rest, Token *tok, Scope *scope);
+ASTNode *equality(Token **rest, Token *tok, Scope *scope);
+ASTNode *relational(Token **rest, Token *tok, Scope *scope);
+ASTNode *shift(Token **rest, Token *tok, Scope *scope);
+ASTNode *add(Token **rest, Token *tok, Scope *scope);
+ASTNode *new_add(ASTNode *lhsn, ASTNode *rhsn, Token *tok);
+ASTNode *new_sub(ASTNode *lhsn, ASTNode *rhsn, Token *tok);
+ASTNode *mul(Token **rest, Token *tok, Scope *scope);
+ASTNode *postfix(Token **rest, Token *tok, Scope *scope);
+ASTNode *funcall(Token **rest, Token *tok, ASTNode *node, Scope *scope);
+ASTNode *unary(Token **rest, Token *tok, Scope *scope);
+ASTNode *primary(Token **rest, Token *tok, Scope *scope);
+Token *parse_typedef(Token *tok, Type *basety, Scope *scope);
+bool is_function(Token *tok, Scope *scope);
+Token *functionp(Token *tok, Type *basety, VarAttr *attr, Scope **scope, Obj **globals);
+
+/* Private Implementation */
+//@ predicate ffalse() = false;
+void gv_unreachable()
+//@ requires ?;
+//@ ensures false;
+{
+  //@ unfold ffalse();
+}
+
+StringList *str_void() {
+  StringList *str = new_stringlist();
+  add_char(str,'v');
+  add_char(str,'o');
+  add_char(str,'i');
+  add_char(str,'d');
+  return str;
+}
+StringList *str_bool() {
+  StringList *str = new_stringlist();
+  add_char(str,'_');
+  add_char(str,'B');
+  add_char(str,'o');
+  add_char(str,'o');
+  add_char(str,'l');
+  return str;
+}
+StringList *str_char() {
+  StringList *str = new_stringlist();
+  add_char(str,'c');
+  add_char(str,'h');
+  add_char(str,'a');
+  add_char(str,'r');
+  return str;
+}
+StringList *str_short() {
+  StringList *str = new_stringlist();
+  add_char(str,'s');
+  add_char(str,'h');
+  add_char(str,'o');
+  add_char(str,'r');
+  add_char(str,'t');
+  return str;
+}
+StringList *str_int() {
+  StringList *str = new_stringlist();
+  add_char(str,'i');
+  add_char(str,'n');
+  add_char(str,'t');
+  return str;
+}
+StringList *str_long() {
+  StringList *str = new_stringlist();
+  add_char(str,'l');
+  add_char(str,'o');
+  add_char(str,'n');
+  add_char(str,'g');
+  return str;
+}
+StringList *str_struct() {
+  StringList *str = new_stringlist();
+  add_char(str,'s');
+  add_char(str,'t');
+  add_char(str,'r');
+  add_char(str,'u');
+  add_char(str,'c');
+  add_char(str,'t');
+  return str;
+}
+StringList *str_typedef() {
+  StringList *str = new_stringlist();
+  add_char(str,'t');
+  add_char(str,'y');
+  add_char(str,'p');
+  add_char(str,'e');
+  add_char(str,'d');
+  add_char(str,'e');
+  add_char(str,'f');
+  return str;
+}
+StringList *str_enum() {
+  StringList *str = new_stringlist();
+  add_char(str,'e');
+  add_char(str,'n');
+  add_char(str,'u');
+  add_char(str,'m');
+  return str;
+}
+StringList *str_static() {
+  StringList *str = new_stringlist();
+  add_char(str,'s');
+  add_char(str,'t');
+  add_char(str,'a');
+  add_char(str,'t');
+  add_char(str,'i');
+  add_char(str,'c');
+  return str;
+}
+StringList *str_extern() {
+  StringList *str = new_stringlist();
+  add_char(str,'e');
+  add_char(str,'x');
+  add_char(str,'t');
+  add_char(str,'e');
+  add_char(str,'r');
+  add_char(str,'n');
+  return str;
+}
+StringList *str_signed() {
+  StringList *str = new_stringlist();
+  add_char(str,'s');
+  add_char(str,'i');
+  add_char(str,'g');
+  add_char(str,'n');
+  add_char(str,'e');
+  add_char(str,'d');
+  return str;
+}
+StringList *str_unsigned() {
+  StringList *str = new_stringlist();
+  add_char(str,'u');
+  add_char(str,'n');
+  add_char(str,'s');
+  add_char(str,'i');
+  add_char(str,'g');
+  add_char(str,'n');
+  add_char(str,'e');
+  add_char(str,'d');
+  return str;
+}
+StringList *str_const() {
+  StringList *str = new_stringlist();
+  add_char(str,'c');
+  add_char(str,'o');
+  add_char(str,'n');
+  add_char(str,'s');
+  add_char(str,'t');
+  return str;
+}
+StringList *str_volatile() {
+  StringList *str = new_stringlist();
+  add_char(str,'v');
+  add_char(str,'o');
+  add_char(str,'l');
+  add_char(str,'a');
+  add_char(str,'t');
+  add_char(str,'i');
+  add_char(str,'l');
+  add_char(str,'e');
+  return str;
+}
+StringList *str_auto() {
+  StringList *str = new_stringlist();
+  add_char(str,'a');
+  add_char(str,'u');
+  add_char(str,'t');
+  add_char(str,'o');
+  return str;
+}
+StringList *str_register() {
+  StringList *str = new_stringlist();
+  add_char(str,'r');
+  add_char(str,'e');
+  add_char(str,'g');
+  add_char(str,'i');
+  add_char(str,'s');
+  add_char(str,'t');
+  add_char(str,'e');
+  add_char(str,'r');
+  return str;
+}
+StringList *str_restrict() {
+  StringList *str = new_stringlist();
+  add_char(str,'r');
+  add_char(str,'e');
+  add_char(str,'s');
+  add_char(str,'t');
+  add_char(str,'r');
+  add_char(str,'i');
+  add_char(str,'c');
+  add_char(str,'t');
+  return str;
+}
+StringList *str_float() {
+  StringList *str = new_stringlist();
+  add_char(str,'f');
+  add_char(str,'l');
+  add_char(str,'o');
+  add_char(str,'a');
+  add_char(str,'t');
+  return str;
+}
+StringList *str_double() {
+  StringList *str = new_stringlist();
+  add_char(str,'d');
+  add_char(str,'o');
+  add_char(str,'u');
+  add_char(str,'b');
+  add_char(str,'l');
+  add_char(str,'e');
+  return str;
+}
+StringList *str_inline() {
+  StringList *str = new_stringlist();
+  add_char(str,'i');
+  add_char(str,'n');
+  add_char(str,'l');
+  add_char(str,'i');
+  add_char(str,'n');
+  add_char(str,'e');
+  return str;
+}
+StringList *str_oparen() {
+  StringList *str = new_stringlist();
+  add_char(str,'(');
+  return str;
+}
+StringList *str_cparen() {
+  StringList *str = new_stringlist();
+  add_char(str,')');
+  return str;
+}
+StringList *str_obracket() {
+  StringList *str = new_stringlist();
+  add_char(str,'{');
+  return str;
+}
+StringList *str_cbracket() {
+  StringList *str = new_stringlist();
+  add_char(str,'}');
+  return str;
+}
+StringList *str_eq() {
+  StringList *str = new_stringlist();
+  add_char(str,'=');
+  return str;
+}
+StringList *str_comma() {
+  StringList *str = new_stringlist();
+  add_char(str,',');
+  return str;
+}
+StringList *str_semicolon() {
+  StringList *str = new_stringlist();
+  add_char(str,';');
+  return str;
+}
+StringList *str_colon() {
+  StringList *str = new_stringlist();
+  add_char(str,':');
+  return str;
+}
+StringList *str_star() {
+  StringList *str = new_stringlist();
+  add_char(str,'*');
+  return str;
+}
+StringList *str_logor() {
+  StringList *str = new_stringlist();
+  add_char(str,'|');
+  add_char(str,'|');
+  return str;
+}
+StringList *str_logand() {
+  StringList *str = new_stringlist();
+  add_char(str,'&');
+  add_char(str,'&');
+  return str;
+}
+StringList *str_bitor() {
+  StringList *str = new_stringlist();
+  add_char(str,'|');
+  return str;
+}
+StringList *str_bitxor() {
+  StringList *str = new_stringlist();
+  add_char(str,'^');
+  return str;
+}
+StringList *str_bitand() {
+  StringList *str = new_stringlist();
+  add_char(str,'&');
+  return str;
+}
+StringList *str_logeq() {
+  StringList *str = new_stringlist();
+  add_char(str,'=');
+  add_char(str,'=');
+  return str;
+}
+StringList *str_logneq() {
+  StringList *str = new_stringlist();
+  add_char(str,'!');
+  add_char(str,'=');
+  return str;
+}
+StringList *str_lt() {
+  StringList *str = new_stringlist();
+  add_char(str,'<');
+  return str;
+}
+StringList *str_le() {
+  StringList *str = new_stringlist();
+  add_char(str,'<');
+  add_char(str,'=');
+  return str;
+}
+StringList *str_gt() {
+  StringList *str = new_stringlist();
+  add_char(str,'>');
+  return str;
+}
+StringList *str_ge() {
+  StringList *str = new_stringlist();
+  add_char(str,'>');
+  add_char(str,'=');
+  return str;
+}
+StringList *str_bitshl() {
+  StringList *str = new_stringlist();
+  add_char(str,'<');
+  add_char(str,'<');
+  return str;
+}
+StringList *str_bitshr() {
+  StringList *str = new_stringlist();
+  add_char(str,'>');
+  add_char(str,'>');
+  return str;
+}
+StringList *str_add() {
+  StringList *str = new_stringlist();
+  add_char(str,'+');
+  return str;
+}
+StringList *str_sub() {
+  StringList *str = new_stringlist();
+  add_char(str,'-');
+  return str;
+}
+StringList *str_mul() {
+  StringList *str = new_stringlist();
+  add_char(str,'*');
+  return str;
+}
+StringList *str_div() {
+  StringList *str = new_stringlist();
+  add_char(str,'/');
+  return str;
+}
+StringList *str_mod() {
+  StringList *str = new_stringlist();
+  add_char(str,'%');
+  return str;
+}
+StringList *str_lognot() {
+  StringList *str = new_stringlist();
+  add_char(str,'!');
+  return str;
+}
+StringList *str_bitnot() {
+  StringList *str = new_stringlist();
+  add_char(str,'~');
+  return str;
+}
+StringList *str_return() {
+  StringList *str = new_stringlist();
+  add_char(str,'r');
+  add_char(str,'e');
+  add_char(str,'t');
+  add_char(str,'u');
+  add_char(str,'r');
+  add_char(str,'n');
+  return str;
+}
+StringList *str_if() {
+  StringList *str = new_stringlist();
+  add_char(str,'i');
+  add_char(str,'f');
+  return str;
+}
+StringList *str_else() {
+  StringList *str = new_stringlist();
+  add_char(str,'e');
+  add_char(str,'l');
+  add_char(str,'s');
+  add_char(str,'e');
+  return str;
+}
+StringList *str_while() {
+  StringList *str = new_stringlist();
+  add_char(str,'w');
+  add_char(str,'h');
+  add_char(str,'i');
+  add_char(str,'l');
+  add_char(str,'e');
+  return str;
+}
+
+void unreachable() {
+  parser_error();
+}
+
+typedef struct VarScope VarScope;
+struct VarScope {
+  Obj *var;
+  Type *type_def;
+};
+
+typedef struct VarScopeMap VarScopeMap;
+struct VarScopeMap {
+  StringList *key;
+  VarScope *val;
+  VarScopeMap *next;
+};
+
+typedef struct TagScopeMap TagScopeMap;
+struct TagScopeMap {
+  StringList *key;
+  Type *val;
+  TagScopeMap *next;
+};
+
+VarScopeMap *new_varscopemap() {
+  VarScopeMap *vsm = alloc(VarScopeMap);
+  vsm->key = NULL;
+  vsm->val = NULL;
+  vsm->next = NULL;
+  return vsm;
+}
+TagScopeMap *new_tagscopemap() {
+  TagScopeMap *tsm = alloc(TagScopeMap);
+  tsm->key = NULL;
+  tsm->val = NULL;
+  tsm->next = NULL;
+  return tsm;
+}
+
+VarScope *varscopemap_get(VarScopeMap *map, StringList *key) {
+  if (map != NULL) {
+    VarScopeMap *curr = map;
+    VarScope *res = NULL;
+    while (curr != NULL && res == NULL) {
+      if (equals(curr->key, key))
+        res = curr->val;
+      curr = curr->next;
+    }
+    return res;
+  } else {
+    return NULL;
+  }
+}
+Type *tagscopemap_get(TagScopeMap *map, StringList *key) {
+  if (map != NULL) {
+    TagScopeMap *curr = map;
+    Type *res = NULL;
+    while (curr != NULL && res == NULL) {
+      if (equals(curr->key, key))
+        res = curr->val;
+      curr = curr->next;
+    }
+    return res;
+  } else {
+    return NULL;
+  }
+}
+
+VarScope *varscopemap_put(VarScopeMap *map, StringList *key, VarScope *val) {
+  if (map != NULL) {
+    VarScopeMap *curr = map;
+    VarScopeMap *prev = map;
+    VarScope *res = NULL;
+    while (curr != NULL && res == NULL) {
+      if (equals(curr->key, key)) {
+        res = curr->val;
+        curr->val = val;
+      }
+      prev = curr;
+      curr = curr->next;
+    }
+    if (res == NULL) {
+      VarScopeMap *newvsm = new_varscopemap();
+      newvsm->key = key;
+      newvsm->val = val;
+      newvsm->next = NULL;
+      prev->next = newvsm;
+    }
+    return res;
+  } else {
+    scope_error();
+    return NULL;
+  }
+}
+
+Type *tagscopemap_put(TagScopeMap *map, StringList *key, Type *val) {
+  if (map != NULL) {
+    TagScopeMap *curr = map;
+    TagScopeMap *prev = map;
+    Type *res = NULL;
+    while (curr != NULL && res == NULL) {
+      if (equals(curr->key, key)) {
+        res = curr->val;
+        curr->val = val;
+      }
+      prev = curr;
+      curr = curr->next;
+    }
+    if (res == NULL) {
+      TagScopeMap *newtsm = new_tagscopemap();
+      newtsm->key = key;
+      newtsm->val = val;
+      newtsm->next = NULL;
+      prev->next = newtsm;
+    }
+    return res;
+  } else {
+   scope_error();
+   return NULL;
+  }
+}
+
+
+struct Scope {
+  Scope *next;
+  VarScopeMap *vars;
+  TagScopeMap *tags;
+};
+
+Scope *new_scope() {
+  Scope *scope = alloc(Scope);
+  scope->next = NULL;
+  scope->vars = new_varscopemap();
+  scope->tags = new_tagscopemap();
+  return scope;
+}
+
+VarScope *push_scope(Scope *scope, StringList *name) {
+  VarScope *sc = alloc(VarScope);
+  varscopemap_put(scope->vars, name, sc);
+  return sc;
+}
+
+void push_tag_scope(Scope *scope, StringList *name, Type *ty) {
+    tagscopemap_put(scope->tags, name, ty);
+}
+
+void enter_scope(Scope **scope) {
+  Scope *sc = new_scope();
+  sc->next = *scope;
+  *scope = sc;
+}
+
+void leave_scope(Scope **scope) {
+  *scope = (*scope)->next;
+}
+
+struct VarAttr {
+  bool is_typedef;
+  int align;
+};
+
+VarAttr *new_attr() {
+  VarAttr *attr = alloc(VarAttr);
+  attr->is_typedef = false;
+  attr->align = 0;
+  return attr;
+}
+
+Obj *new_var(Scope *scope, StringList *name, Type *ty) {
+  Obj *v = alloc(Obj);
+  v->name = name;
+  v->ty = ty;
+  v->align = ty->align;
+  VarScope *tmp = push_scope(scope, name);
+  tmp->var = v;
+  return v;
+}
+
+Obj *new_lvar(Scope *scope, Obj **locals, StringList *name, Type *ty) {
+  Obj *v = new_var(scope, name, ty);
+  v->is_local = true;
+  v->next = *locals;
+  *locals = v;
+  return v;
+}
+
+Obj *new_gvar(Scope *scope, Obj **globals, StringList *name, Type *ty) {
+  Obj *v = new_var(scope, name, ty);
+  v->next = *globals;
+  v->is_definition = true;
+  *globals = v;
+  return v;
+}
+
+VarScope *find_var(Token *tok, Scope *scope)
+{
+  for (Scope *sc = scope; sc != NULL; sc = sc->next) {
+    VarScope *sc2 = varscopemap_get(sc->vars, tok_name(tok));
+    if (sc2 != NULL)
+      return sc2;
+  }
+  return NULL;
+}
+
+Type *find_tag(Token *tok, Scope *scope) {
+  for (Scope *sc = scope; sc != NULL; sc = sc->next) {
+    Type *ty = tagscopemap_get(sc->tags, tok_name(tok));
+    if (ty != NULL)
+      return ty;
+  }
+  return NULL;
+}
+
+ASTNode *logor(Token **rest, Token *tok, Scope *scope) {
+  Token **rst = alloc(Token*);
+  *rst = tok;
+  ASTNode *node = logand(rst, tok, scope);
+  tok = *rst;
+  while (equal(tok, str_logor())) {
+    Token *start = tok;
+    *rst = tok;
+    node = new_binary(new_ND_LOGOR(), node, logand(rst, tok->next, scope), start);
+    tok = *rst;
+  }
+  *rest = tok;
+  return node;
+}
+ASTNode *logand(Token **rest, Token *tok, Scope *scope) {
+  Token **rst = alloc(Token*);
+  *rst = tok;
+  ASTNode *node = bitor(rst, tok, scope);
+  tok = *rst;
+  while (equal(tok, str_logand())) {
+    Token *start = tok;
+    *rst = tok;
+    node = new_binary(new_ND_LOGAND(), node, bitor(rst, tok->next, scope), start);
+    tok = *rst;
+  }
+  *rest = tok;
+  return node;
+}
+ASTNode *bitor(Token **rest, Token *tok, Scope *scope) {
+  Token **rst = alloc(Token*);
+  *rst = tok;
+  ASTNode *node = bitxor(rst, tok, scope);
+  tok = *rst;
+  while (equal(tok, str_bitor())) {
+    Token *start = tok;
+    *rst = tok;
+    node = new_binary(new_ND_BITOR(), node, bitxor(rst, tok->next, scope), start);
+    tok = *rst;
+  }
+  *rest = tok;
+  return node;
+}
+ASTNode *bitxor(Token **rest, Token *tok, Scope *scope) {
+  Token **rst = alloc(Token*);
+  *rst = tok;
+  ASTNode *node = bitand(rst, tok, scope);
+  tok = *rst;
+  while (equal(tok, str_bitxor())) {
+    Token *start = tok;
+    *rst = tok;
+    node = new_binary(new_ND_BITXOR(), node, bitand(rst, tok->next, scope), start);
+    tok = *rst;
+  }
+  *rest = tok;
+  return node;
+}
+ASTNode *bitand(Token **rest, Token *tok, Scope *scope) {
+  Token **rst = alloc(Token*);
+  *rst = tok;
+  ASTNode *node = equality(rst, tok, scope);
+  tok = *rst;
+  while (equal(tok, str_bitand())) {
+    Token *start = tok;
+    *rst = tok;
+    node = new_binary(new_ND_BITAND(), node, equality(rst, tok->next, scope), start);
+    tok = *rst;
+  }
+  *rest = tok;
+  return node;
+}
+ASTNode *equality(Token **rest, Token *tok, Scope *scope) {
+  Token **rst = alloc(Token*);
+  *rst = tok;
+  ASTNode *node = relational(rst, tok, scope);
+  tok = *rst;
+
+  bool break_loop = false;
+  while (!break_loop) {
+    Token *start = tok;
+
+    if (equal(tok, str_logeq())) {
+      *rst = tok;
+      node = new_binary(new_ND_EQ(), node, relational(rst, tok->next, scope), start);
+      tok = *rst;
+    } else if (equal(tok, str_logneq())) {
+      *rst = tok;
+      node = new_binary(new_ND_NE(), node, relational(rst, tok->next, scope), start);
+      tok = *rst;
+    } else {
+      *rest = tok;
+      break_loop = true;
+    }
+  }
+  return node;
+}
+ASTNode *relational(Token **rest, Token *tok, Scope *scope) {
+  Token **rst = alloc(Token*);
+  *rst = tok;
+  ASTNode *node = shift(rst, tok, scope);
+  tok = *rst;
+
+  bool break_loop = false;
+  while (!break_loop) {
+    Token *start = tok;
+
+    if (equal(tok, str_lt())) {
+      *rst = tok;
+      node = new_binary(new_ND_LT(), node, shift(rst, tok->next, scope), start);
+      tok = *rst;
+    } else if (equal(tok, str_le())) {
+      *rst = tok;
+      node = new_binary(new_ND_LE(), node, shift(rst, tok->next, scope), start);
+      tok = *rst;
+    } else if (equal(tok, str_gt())) {
+      *rst = tok;
+      node = new_binary(new_ND_LT(), shift(rst, tok->next, scope), node, start);
+      tok = *rst;
+    } else if (equal(tok, str_ge())) {
+      *rst = tok;
+      node = new_binary(new_ND_LE(), shift(rst, tok->next, scope), node, start);
+      tok = *rst;
+    } else {
+      *rest = tok;
+      break_loop = true;
+    }
+  }
+  return node;
+}
+ASTNode *shift(Token **rest, Token *tok, Scope *scope) {
+  Token **rst = alloc(Token*);
+  *rst = tok;
+  ASTNode *node = add(rst, tok, scope);
+  tok = *rst;
+
+  bool break_loop = false;
+  while (!break_loop) {
+    Token *start = tok;
+
+    if (equal(tok, str_bitshl())) {
+      *rst = tok;
+      node = new_binary(new_ND_SHL(), node, add(rst, tok->next, scope), start);
+      tok = *rst;
+    } else if (equal(tok, str_bitshr())) {
+      *rst = tok;
+      node = new_binary(new_ND_SHR(), node, add(rst, tok->next, scope), start);
+      tok = *rst;
+    } else {
+      *rest = tok;
+      break_loop = true;
+    }
+  }
+  return node;
+}
+ASTNode *new_add(ASTNode *lhsn, ASTNode *rhsn, Token *tok) {
+  add_type(lhsn);
+  add_type(rhsn);
+
+  if (is_numeric(lhsn->ty) && is_numeric(rhsn->ty)) {
+    return new_binary(new_ND_ADD(), lhsn, rhsn, tok);
+  } else {
+    num_op_error();
+    return NULL;
+  }
+}
+ASTNode *new_sub(ASTNode *lhsn, ASTNode *rhsn, Token *tok) {
+  add_type(lhsn);
+  add_type(rhsn);
+
+  if (is_numeric(lhsn->ty) && is_numeric(rhsn->ty)) {
+    return new_binary(new_ND_SUB(), lhsn, rhsn, tok);
+  } else {
+    num_op_error();
+    return NULL;
+  }
+}
+ASTNode *add(Token **rest, Token *tok, Scope *scope) {
+  Token **rst = alloc(Token*);
+  *rst = tok;
+  ASTNode *node = mul(rst, tok, scope);
+  tok = *rst;
+
+  bool break_loop = false;
+  while(!break_loop) {
+    Token *start = tok;
+
+    if (equal(tok, str_add())) {
+      *rst = tok;
+      node = new_add(node, mul(rst, tok->next, scope), start);
+      tok = *rst;
+    } else if (equal(tok, str_sub())) {
+      *rst = tok;
+      node = new_sub(node, mul(rst, tok->next, scope), start);
+      tok = *rst;
+    } else {
+      *rest = tok;
+      break_loop = true;
+    }
+  }
+  return node;
+}
+ASTNode *mul(Token **rest, Token *tok, Scope *scope) {
+  Token **rst = alloc(Token*);
+  *rst = tok;
+  ASTNode *node = unary(rst, tok, scope);
+  tok = *rst;
+
+  bool break_loop = false;
+  while (!break_loop) {
+    Token *start = tok;
+
+    if (equal(tok, str_mul())) {
+      *rst = tok;
+      node = new_binary(new_ND_MUL(), node, unary(rst, tok->next, scope), start);
+      tok = *rst;
+    } else if (equal(tok, str_div())) {
+      *rst = tok;
+      node = new_binary(new_ND_DIV(), node, unary(rst, tok->next, scope), start);
+      tok = *rst;
+    } else if (equal(tok, str_mod())) {
+      *rst = tok;
+      node = new_binary(new_ND_MOD(), node, unary(rst, tok->next, scope), start);
+      tok = *rst;
+    } else {
+      *rest = tok;
+      break_loop = true;
+    }
+  }
+  return node;
+}
+ASTNode *unary(Token **rest, Token *tok, Scope *scope) {
+  if (equal(tok, str_add())) {
+    return unary(rest, tok->next, scope);
+
+  } else if (equal(tok, str_sub())) {
+    return new_unary(new_ND_NEG(), unary(rest, tok->next, scope), tok);
+
+  } else if (equal(tok, str_bitand())) {
+    ASTNode *lhsn = unary(rest, tok->next, scope);
+    add_type(lhsn);
+    return new_unary(new_ND_ADDR(), lhsn, tok);
+
+  } else if (equal(tok, str_mul())) {
+    ASTNode *node = unary(rest, tok->next, scope);
+    add_type(node);
+    if (is_FUNC(node->ty))
+      return node;
+    else
+      return new_unary(new_ND_DEREF(), node, tok);
+
+  } else if (equal(tok, str_lognot())) {
+    return new_unary(new_ND_NOT(), unary(rest, tok->next, scope), tok);
+
+  } else if (equal(tok, str_bitnot())) {
+    return new_unary(new_ND_BITNOT(), unary(rest, tok->next, scope), tok);
+
+  } else {
+    return postfix(rest, tok, scope);
+  }
+}
+ASTNode *postfix(Token **rest, Token *tok, Scope *scope) {
+  Token **rst = alloc(Token*);
+  *rst = tok;
+  ASTNode *node = primary(rst, tok, scope);
+  tok = *rst;
+
+  bool break_loop = false;
+  while (!break_loop) {
+    if (equal(tok, str_oparen())) {
+      *rst = tok;
+      node = funcall(rst, tok->next, node, scope);
+      tok = *rst;
+    } else  {
+      *rest = tok;
+      break_loop = true;
+    }
+  }
+  return node;
+}
+ASTNode *primary(Token **rest, Token *tok, Scope *scope) {
+  Token *start = tok;
+  Token **rst = alloc(Token*);
+  *rst = tok;
+
+  if (equal(tok, str_oparen())) {
+    ASTNode *node = expr(rst, tok->next, scope);
+    tok = *rst;
+    *rest = skip(tok, str_cparen());
+    return node;
+
+  } else if (is_IDENT(tok)) {
+    VarScope *sc = find_var(tok, scope);
+    *rest = tok->next;
+
+    if (sc != NULL) {
+      if (sc->var != NULL) {
+        ASTNode *node = new_node(new_ND_VAR(), tok);
+        node->var = sc->var;
+        return node;
+      } else if (equal(tok->next, str_oparen())) {
+        func_impdecl_error();
+        return NULL;
+      } else {
+        undef_variable_error();
+        return NULL;
+      }
+    } else {
+      if (equal(tok->next, str_oparen())) {
+        func_impdecl_error();
+        return NULL;
+      } else {
+        undef_variable_error();
+        return NULL;
+      }
+    }
+  } else if (is_NUM(tok)) {
+    ASTNode *node;
+    node = new_node(new_ND_NUM(), tok);
+    node->val = tok_name(tok);
+
+    node->ty = tok->ty;
+    *rest = tok->next;
+    return node;
+  } else {
+    expr_error();
+    return NULL;
+  }
+}
+ASTNode *funcall(Token **rest, Token *tok, ASTNode *fn, Scope *scope) {
+  add_type(fn);
+
+  if (!is_FUNC(fn->ty) &&
+      (!is_PTR(fn->ty) || !is_FUNC(fn->ty->base)))
+    func_error();
+
+  Type *ty = NULL;
+  if (is_FUNC(fn->ty))
+    ty = fn->ty;
+  else
+    ty = fn->ty->base;
+
+  Type *param_ty = ty->params;
+
+  ASTNode *head = empty_node();
+  ASTNode *cur = head;
+
+  Token **rst = alloc(Token*);
+
+  while (!equal(tok, str_cparen())) {
+    if (cur != head)
+      tok = skip(tok, str_comma());
+
+    *rst = tok;
+    ASTNode *arg = assign(rst, tok, scope);
+    tok = *rst;
+    add_type(arg);
+
+    if (param_ty != NULL) {
+      param_ty = param_ty->next;
+    } else {
+      func_args_error(true);
+    }
+
+    cur->next = arg;
+    cur = cur->next;
+  }
+
+  if (param_ty != NULL)
+    func_args_error(false);
+
+  *rest = skip(tok, str_cparen());
+
+  ASTNode *node = new_unary(new_ND_FUNCALL(), fn, tok);
+  node->func_ty = ty;
+  node->ty = ty->return_ty;
+  node->args = head->next;
+
+  return node;
+}
+
+ASTNode *assign(Token **rest, Token *tok, Scope *scope) {
+  Token **rst = alloc(Token*);
+  *rst = tok;
+  ASTNode *node = logor(rst, tok, scope);
+  tok = *rst;
+
+  if (equal(tok, str_eq())) {
+    return new_binary(new_ND_ASSIGN(), node, assign(rest, tok->next, scope), tok);
+  } else {
+    *rest = tok;
+    return node;
+  }
+}
+
+ASTNode *expr_stmt(Token **rest, Token *tok, Scope *scope) {
+  if (equal(tok, str_semicolon())) {
+    *rest = tok->next;
+    return new_node(new_ND_BLOCK(), tok);
+  } else {
+    ASTNode *node = new_node(new_ND_EXPR_STMT(), tok);
+    Token **rst = alloc(Token*);
+    *rst = tok;
+    node->lhs = expr(rst, tok, scope);
+    tok = *rst;
+    *rest = skip(tok, str_semicolon());
+    return node;
+  }
+}
+
+ASTNode *expr(Token **rest, Token *tok, Scope *scope) {
+  Token **rst = alloc(Token*);
+  *rst = tok;
+  ASTNode *node = assign(rst, tok, scope);
+  tok = *rst;
+
+  if (equal(tok, str_comma())) {
+    return new_binary(new_ND_COMMA(), node, expr(rest, tok->next, scope), tok);
+  } else {
+    *rest = tok;
+    return node;
+  }
+}
+
+ASTNode *stmt(Token **rest, Token *tok, Scope **scope, Obj **globals, Obj **locals) {
+  Token **rst = alloc(Token*);
+
+  if (equal(tok, str_return())) {
+    ASTNode *node = new_node(new_ND_RETURN(), tok);
+    if (consume(rest, tok->next, str_semicolon())) {
+      return node;
+    } else {
+      *rst = tok;
+      ASTNode *exp = expr(rst, tok->next, *scope);
+      tok = *rst;
+      *rest = skip(tok, str_semicolon());
+
+      add_type(exp);
+
+      node->lhs = exp;
+      return node;
+    }
+
+  } else if (equal(tok, str_if())) {
+    ASTNode *node = new_node(new_ND_IF(), tok);
+    tok = skip(tok->next, str_oparen());
+    *rst = tok;
+    node->cond = expr(rst, tok, *scope);
+    tok = *rst;
+    tok = skip(tok, str_cparen());
+    *rst = tok;
+    node->then = stmt(rst, tok, scope, globals, locals);
+    tok = *rst;
+    if (equal(tok, str_else())) {
+      *rst = tok;
+      node->els = stmt(rst, tok->next, scope, globals, locals);
+      tok = *rst;
+    }
+    *rest = tok;
+    return node;
+
+  } else if (equal(tok, str_while())) {
+    ASTNode *node = new_node(new_ND_FOR(), tok);
+    tok = skip(tok->next, str_oparen());
+    *rst = tok;
+    node->cond = expr(rst, tok, *scope);
+    tok = *rst;
+    tok = skip(tok, str_cparen());
+
+    node->then = stmt(rest, tok, scope, globals, locals);
+
+    return node;
+  } else if (equal(tok, str_obracket())) {
+    return compound_stmt(rest, tok->next, scope, globals, locals);
+  } else {
+    return expr_stmt(rest, tok, *scope);
+  }
+}
+
+ASTNode *compound_stmt(Token **rest, Token *tok, Scope **scope, Obj **globals, Obj **locals) {
+  ASTNode *node = new_node(new_ND_BLOCK(), tok);
+  ASTNode *head = empty_node();
+  ASTNode *cur = head;
+  Token **rst = alloc(Token*);
+
+  enter_scope(scope);
+
+  bool continue_loop = false;
+  while (!equal(tok, str_cbracket())) {
+    continue_loop = false;
+
+    if (is_typename(tok,*scope) && !equal(tok->next, str_colon())) {
+      VarAttr *attr = new_attr();
+      *rst = tok;
+      Type *basety = declspec(rst, tok, tok, attr, *scope);
+      tok = *rst;
+
+      if (attr->is_typedef) {
+        tok = parse_typedef(tok, basety, *scope);
+        continue_loop = true;
+      } else if (is_function(tok, *scope)) {
+        tok = functionp(tok, basety, attr, scope, globals);
+        continue_loop = true;
+      } else {
+        *rst = tok;
+        cur->next = declaration(rst, tok, basety, attr, scope, locals);
+        tok = *rst;
+        cur = cur->next;
+      }
+    } else {
+      *rst = tok;
+      cur->next = stmt(rst, tok, scope, globals, locals);
+      tok = *rst;
+      cur = cur->next;
+    }
+    if (!continue_loop) {
+      add_type(cur);
+    }
+  }
+
+  leave_scope(scope);
+
+  node->body = head->next;
+  *rest = tok->next;
+  return node;
+}
+
+ASTNode *declaration(Token **rest, Token *tok, Type *basety, VarAttr *attr, Scope **scope, Obj **locals) {
+  Token **rst = alloc(Token*);
+  int i = 0;
+
+  while (!equal(tok, str_semicolon())) {
+    if (i > 0)
+      tok = skip(tok, str_comma());
+    i = i + 1;
+
+    *rst = tok;
+    Type *ty = declarator(rst, tok, tok, basety, *scope);
+    tok = *rst;
+
+    if (is_VOID(ty)) {
+      var_decl_void_error();
+    } else if (ty_name(ty) == NULL) {
+      var_name_error();
+    } else {
+      Obj *v = new_lvar(*scope, locals, ty_name(ty), ty);
+      if (attr != NULL && attr->align > 0)
+        v->align = attr->align;
+
+      if (v->ty->size < 0)
+        var_type_error();
+      if (is_VOID(v->ty))
+        var_decl_void_error();
+    }
+  }
+
+  ASTNode *node = new_node(new_ND_BLOCK(), tok);
+  *rest = tok->next;
+  return node;
+}
+
+Type *find_typedef(Token *tok, Scope *scope) {
+  if (is_IDENT(tok)) {
+    VarScope *sc = find_var(tok, scope);
+    if (sc != NULL)
+      return sc->type_def;
+  }
+  return NULL;
+}
+
+bool is_typename(Token *tok, Scope *scope)
+{
+
+  bool res = false;
+  if (equal(tok,str_void())     || equal(tok,str_bool())     || equal(tok,str_char())   ||
+      equal(tok,str_short())    || equal(tok,str_int())      || equal(tok,str_long())   ||
+      equal(tok,str_struct())   || equal(tok,str_typedef())  || equal(tok,str_enum())   ||
+      equal(tok,str_static())   || equal(tok,str_extern())   || equal(tok,str_signed()) ||
+      equal(tok,str_const())    || equal(tok,str_volatile()) || equal(tok,str_auto())   ||
+      equal(tok,str_register()) || equal(tok,str_restrict()) || equal(tok,str_float())  ||
+      equal(tok,str_double())   || equal(tok,str_typedef())  || equal(tok,str_inline()) ||
+      equal(tok,str_unsigned()) || find_typedef(tok,scope) != NULL
+     )
+    res = true;
+
+  return res;
+}
+
+Type *declspec(Token **rest, Token *tok, Token *gv_tok, VarAttr *attr, Scope *scope)
+//@ requires ? && acc(*rest) && tokenListSeg(tok, NULL) && tok == gv_tok;
+//@ ensures ? && acc(*rest) && tokenListSeg(gv_tok, *rest) && tokenListSeg(*rest, NULL);
+{
+  int VOID     = 0;
+  int BOOL     = 0;
+  int CHAR     = 0;
+  int SHORT    = 0;
+  int INT      = 0;
+  int LONG     = 0;
+  int FLOAT    = 0;
+  int DOUBLE   = 0;
+  int OTHER    = 0;
+  int SIGNED   = 0;
+  int UNSIGNED = 0;
+
+  Type *ty = new_ty_int();
+  int counter = 0;
+  bool break_loop = false;
+
+  bool gv_beforeloop = true;
+  Token *gv_tok_prev = tok;
+  //@ fold tokenListSeg(gv_tok, gv_tok_prev);
+  //@ fold tokenListSeg(gv_tok_prev, tok);
+  while (!break_loop && is_typename(tok, scope))
+  //@ loop_invariant ? && tokenListSeg(gv_tok, gv_tok_prev) && tokenListSeg(gv_tok_prev, tok) && tokenListSeg(tok, NULL);
+  //@ loop_invariant (gv_beforeloop == true ? gv_tok == tok && counter == 0 : (break_loop == true ? counter > 0 && gv_tok != tok : gv_tok_prev != tok));
+  {
+    gv_beforeloop = false;
+    gv_tok_prev = tok;
+
+    if (equal(tok, str_typedef()) || equal(tok, str_static()) || equal(tok, str_extern()) ||
+        equal(tok, str_inline())) {
+      if (attr == NULL) {
+        storage_type_error();
+        gv_unreachable();
+      }
+
+
+      if (equal(tok, str_typedef())) {
+        attr->is_typedef = true;
+      } else if (equal(tok, str_static())) {
+        storage_type_unsupported_error();
+        gv_unreachable();
+      } else if (equal(tok, str_extern())) {
+        storage_type_unsupported_error();
+        gv_unreachable();
+      } else {
+        storage_type_unsupported_error();
+        gv_unreachable();
+      }
+
+      //@ unfold tokenListSeg(tok, NULL);
+      //@ unfold tokenListSeg(tok->next, NULL);
+      //@ assert tok != tok->next;
+      //@ fold tokenListSeg(tok->next,NULL);
+      tok = tok->next;
+      //@ assert gv_tok_prev != tok;
+      //@ fold tokenListSeg(gv_tok_prev->next,tok);
+      //@ fold tokenListSeg(gv_tok_prev, tok); // too expensive to statically specify anything else
+
+    } else if (equal(tok, str_const()) || equal(tok, str_volatile()) ||
+               equal(tok, str_auto())  || equal(tok, str_register()) ||
+               equal(tok, str_restrict())) {
+
+      //@ unfold tokenListSeg(tok, NULL);
+      //@ unfold tokenListSeg(tok->next, NULL);
+      //@ assert tok != tok->next;
+      //@ fold tokenListSeg(tok->next,NULL);
+      tok = tok->next;
+      //@ fold tokenListSeg(gv_tok_prev->next,tok);
+      //@ fold tokenListSeg(gv_tok_prev, tok);
+
+    } else {
+      Type *ty2 = find_typedef(tok, scope);
+      if (equal(tok, str_struct()) || equal(tok, str_enum()) ||
+          ty2 != NULL) {
+
+        if (counter > 0) {
+          gv_tokenlistseg_lemma(gv_tok, gv_tok_prev, tok);
+          break_loop = true;
+        } else {
+          Token **rst = alloc(Token*);
+          *rst = tok;
+          if (equal(tok, str_struct())) {
+            structs_enums_unsupported_error();
+            gv_unreachable();
+          } else if (equal(tok, str_enum())) {
+            structs_enums_unsupported_error();
+            gv_unreachable();
+          } else {
+            ty = ty2;
+            //@ unfold tokenListSeg(tok, NULL);
+            //@ unfold tokenListSeg(tok->next, NULL);
+            //@ assert tok != tok->next;
+            //@ fold tokenListSeg(tok->next,NULL);
+            tok = tok->next;
+            //@ fold tokenListSeg(gv_tok_prev->next,tok);
+            //@ fold tokenListSeg(gv_tok_prev, tok);
+          }
+          OTHER = OTHER + 1;
+          counter = counter + 1;
+        }
+      } else {
+        if (equal(tok, str_void())) {
+          VOID = VOID + 1;
+          counter = counter + 1;
+        } else if (equal(tok, str_bool())) {
+          BOOL = BOOL + 1;
+          counter = counter + 1;
+        } else if (equal(tok, str_char())) {
+          CHAR = CHAR + 1;
+          counter = counter + 1;
+        } else if (equal(tok, str_short())) {
+          SHORT = SHORT + 1;
+          counter = counter + 1;
+        } else if (equal(tok, str_int())) {
+          INT = INT + 1;
+          counter = counter + 1;
+        } else if (equal(tok, str_long())) {
+          LONG = LONG + 1;
+          counter = counter + 1;
+        } else if (equal(tok, str_float())) {
+          FLOAT = FLOAT + 1;
+          counter = counter + 1;
+        } else if (equal(tok, str_double())) {
+          DOUBLE = DOUBLE + 1;
+          counter = counter + 1;
+        } else if (equal(tok, str_signed())) {
+          SIGNED = SIGNED + 1;
+          counter = counter + 1;
+        } else if (equal(tok, str_unsigned())) {
+          UNSIGNED = UNSIGNED + 1;
+          counter = counter + 1;
+        } else {
+          unreachable();
+          gv_unreachable();
+        }
+
+        int signed_other = VOID + BOOL + CHAR + SHORT + INT + LONG +
+                            FLOAT + DOUBLE + OTHER + UNSIGNED;
+        int unsigned_other = VOID + BOOL + CHAR + SHORT + INT + LONG +
+                              FLOAT + DOUBLE + OTHER + SIGNED;
+
+        if (counter == 1 && VOID == 1) {
+          ty = new_ty_void();
+        } else if (counter == 1 && BOOL == 1) {
+          ty = new_ty_bool();
+        } else if ((counter == 1 && CHAR == 1) ||
+                   (signed_other == 1 && SIGNED > 0 && CHAR == 1)) {
+          ty = new_ty_char();
+        } else if (unsigned_other == 1 && UNSIGNED > 0 && CHAR == 1) {
+          ty = new_ty_uchar();
+        } else if ((counter == 1 && SHORT == 1) ||
+                   (counter == 2 && SHORT == 1 && INT == 1) ||
+                   (signed_other == 1 && SIGNED > 0 && SHORT == 1) ||
+                   (signed_other == 2 && SIGNED > 0 && SHORT == 1 && INT == 1)) {
+          ty = new_ty_short();
+        } else if ((unsigned_other == 1 && UNSIGNED > 0 && SHORT == 1) ||
+                   (unsigned_other == 2 && UNSIGNED > 0 && SHORT == 1 && INT == 1)) {
+          ty = new_ty_ushort();
+        } else if ((counter == 1 && INT == 1) ||
+                   (signed_other == 0 && SIGNED > 0) ||
+                   (signed_other == 1 && SIGNED > 0 && INT == 1)) {
+          ty = new_ty_int();
+        } else if ((unsigned_other == 0 && UNSIGNED > 0) ||
+                   (unsigned_other == 1 && UNSIGNED > 0 && INT == 1)) {
+          ty = new_ty_uint();
+        } else if ((counter == 1 && LONG == 1) ||
+                   (counter == 2 && LONG == 1 && INT == 1) ||
+                   (counter == 2 && LONG == 2) ||
+                   (counter == 3 && LONG == 2 && INT == 1) ||
+                   (signed_other == 1 && SIGNED > 0 && LONG == 1) ||
+                   (signed_other == 2 && SIGNED > 0 && LONG == 1 && INT == 1) ||
+                   (signed_other == 2 && SIGNED > 0 && LONG == 2) ||
+                   (signed_other == 3 && SIGNED > 0 && LONG == 2 && INT == 1)) {
+          ty = new_ty_long();
+        } else if ((unsigned_other == 1 && UNSIGNED > 0 && LONG == 1) ||
+                   (unsigned_other == 2 && UNSIGNED > 0 && LONG == 1 && INT == 1) ||
+                   (unsigned_other == 2 && UNSIGNED > 0 && LONG == 2) ||
+                   (unsigned_other == 3 && UNSIGNED > 0 && LONG == 2 && INT == 1)) {
+          ty = new_ty_ulong();
+        } else if (counter == 1 && FLOAT == 1) {
+          ty = new_ty_float();
+        } else if (counter == 1 && DOUBLE == 1) {
+          ty = new_ty_double();
+        } else if (counter == 2 && LONG == 1 && DOUBLE == 1) {
+          ty = new_ty_ldouble();
+        } else {
+          type_error();
+          gv_unreachable();
+        }
+
+        //@ unfold tokenListSeg(tok, NULL);
+        //@ unfold tokenListSeg(tok->next, NULL);
+        //@ assert tok != tok->next;
+        //@ fold tokenListSeg(tok->next,NULL);
+        tok = tok->next;
+        //@ fold tokenListSeg(gv_tok_prev->next,tok);
+        //@ fold tokenListSeg(gv_tok_prev, tok);
+      }
+    }
+  }
+
+  *rest = tok;
+  return ty;
+}
+
+Type *func_params(Token **rest, Token *tok, Token *gv_tok, Type *ty, Scope *scope)
+//@ requires ? && acc(*rest) && tokenListSeg(tok, NULL) && gv_tok == tok;
+//@ ensures ? && acc(*rest) && tokenListSeg(gv_tok, *rest) && tokenListSeg(*rest, NULL);
+{
+  if (equal(tok, str_void()) && equal(tok->next, str_cparen())) {
+    *rest = tok->next->next;
+    return func_type(ty);
+  }
+
+  Type *head = empty_type();
+  Type *cur = head;
+  Token **rst = alloc(Token*);
+
+  while (!equal(tok, str_cparen())) {
+    if (cur != head)
+      tok = skip(tok, str_comma());
+
+    *rst = tok;
+    Type *ty2 = declspec(rst, tok, tok, NULL, scope);
+    tok = *rst;
+    ty2 = declarator(rst, tok, tok, ty2, scope);
+    tok = *rst;
+
+    if (is_FUNC(ty2)) {
+      func_as_arg_error();
+    }
+
+    cur->next = copy_type(ty2);
+    cur = cur->next;
+  }
+
+  ty = func_type(ty);
+  ty->params = head->next;
+  *rest = tok->next;
+  return ty;
+}
+
+Type *type_suffix(Token **rest, Token *tok, Type *ty, Scope *scope)
+//@ requires ? && acc(*rest) && tokenListSeg(tok, NULL);
+//@ ensures ? && acc(*rest) && tokenListSeg(tok, *rest) && tokenListSeg(*rest, NULL);
+{
+  if (equal(tok, str_oparen()))
+    //@ unfold tokenListSeg(tok,NULL);
+    return func_params(rest, tok->next, tok->next, ty, scope);
+
+  *rest = tok;
+  return ty;
+}
+
+Type *pointers(Token **rest, Token *tok, Token *gv_tok, Type *ty)
+//@ requires ? && acc(*rest) && tokenListSeg(tok, NULL) && gv_tok == tok;
+//@ ensures ? && acc(*rest) && tokenListSeg(gv_tok, *rest) && tokenListSeg(*rest, NULL);
+{
+  Token **rst = alloc(Token*);
+  *rst = tok;
+  bool consume_b = consume(rst, tok, str_star());
+  tok = *rst;
+  while (consume_b) {
+    ty = pointer_to(ty);
+
+    while (equal(tok, str_const()) || equal(tok, str_volatile()) || equal(tok, str_restrict()))
+      tok = tok->next;
+
+    *rst = tok;
+    consume_b = consume(rst, tok, str_star());
+    tok = *rst;
+  }
+  *rest = tok;
+  return ty;
+}
+
+Type *declarator(Token **rest, Token *tok, Token *gv_tok, Type *ty, Scope *scope)
+//@ requires ? && acc(*rest) && tokenListSeg(tok, *rest) && tokenListSeg(*rest, NULL) && gv_tok == tok;
+//@ ensures ? && acc(*rest) && tokenListSeg(gv_tok, *rest) && tokenListSeg(*rest, NULL);
+//@ ensures acc(\result->name) && (\result->name == NULL ? true : *rest != gv_tok);
+{
+  Token **rst = alloc(Token*);
+  *rst = tok;
+  gv_tokenlistseg_append_lemma(tok,*rest,NULL);
+  ty = pointers(rst, tok, tok, ty);
+  tok = *rst;
+  // tokenListSeg(tok,*rst) && tokenListSeg(*rst, NULL) && gv_tok == tok ==> relation
+  // lost before call to declarator tho; doesn't need to tho
+  if (equal(tok, str_oparen())) {
+    Token *start = tok;
+    Type *dummy = empty_type();
+    //@ unfold tokenListSeg(start, NULL);
+    //@ fold tokenListSeg(start->next, start->next);
+    // need tokenListSeg(start->next, start->next), tokenListSeg(start->next, NULL) and acc(*rst)
+    *rst = start->next;
+    declarator(rst, start->next, start->next, dummy, scope);
+    // get acc(*rst), tokenListSeg(start->next, *rst), tokenListSeg(*rst, NULL)
+    // acc(tmp->name), ...
+    // should have (but don't thanks to ?): tokenListSeg(gv_tok, start)
+    tok = *rst;
+    // can prove tok != start
+    if (tok == NULL) {
+      //@ assert start != tok;
+      //@ fold tokenListSeg(start, tok);
+    } else {
+      //@ unfold tokenListSeg(tok,NULL);
+      //@ assert start != tok;
+      //@ fold tokenListSeg(start,tok);
+    }
+
+    // ultimately only need tokenListSeg(tok, NULL)
+    tok = skip(tok, str_cparen());
+    // have tokenListSeg(tok',tok), tokenListSeg(tok, NULL), tok' != tok
+    // should have but don't: tokenListSeg(gv_tok, start), tokenListSeg(start, tok')
+    // no run time check for tok, but yes for acc(*rest) <-- unavoidable
+    ty = type_suffix(rest, tok, ty, scope);
+    // have acc(*rest), tokenListSeg(tok, *rest), tokenListSeg(*rest,NULL), tok' != tok
+    // should have but don't: tokenListSeg(gv_tok, start), tokenListSeg(start, tok'), tokenListSeg(tok',tok)
+    gv_tokenlistseg_lemma2(*rst,tok,*rest);
+    // tokenListSeg(gv_tok, start), tokenListSeg(start, tok'), tokenListSeg(tok',*rest), tokenListSeg(*rest, NULL)
+    // need start != *rst == tok'
+    gv_tokenlistseg_lemma2(start,*rst,*rest);
+    // tokenListSeg(gv_tok, start), tokenListSeg(start,*rest), tokenListSeg(*rest, NULL), start != *rest
+    gv_tokenlistseg_lemma(gv_tok,start,*rest);
+    *rst = *rest;
+
+    //@ unfold tokenListSeg(start,*rest);
+
+    // need acc(*rst), tokenListSeg(start->next, *rest), tokenListSeg(*rest, NULL)
+    Type *res_ty = declarator(rst, start->next, start->next, ty, scope);
+    // have acc(*rst), tokenListSeg(start->next, *rst), tokenListSeg(*rst, NULL)
+    // acc(res_ty->name), (res_ty->name ? true : start->next != *rst)
+    tok = *rst;
+    return res_ty;
+
+  } else {
+    Token *name = NULL;
+    Token *name_pos = tok;
+
+    if (is_IDENT(tok)) {
+      name = tok;
+      tok = tok->next;
+    }
+
+    ty = type_suffix(rest, tok, ty, scope);
+    ty->name = name;
+    ty->name_pos = name_pos;
+    return ty;
+  }
+}
+
+Token *parse_typedef(Token *tok, Type *basety, Scope *scope)
+//@ requires ? && tokenListSeg(tok, NULL);
+//@ ensures ? && tokenListSeg(\result, NULL);
+{
+  bool first = true;
+
+  Token **rest = alloc(Token*);
+  *rest = tok;
+  Token *gv_tok_prev = tok;
+  bool gv_consume = consume(rest, tok, str_semicolon());
+  bool gv_beforeloop = true;
+  while (!gv_consume)
+  //@ loop_invariant ? && tokenListSeg(gv_tok_prev, tok) && tokenListSeg(tok, NULL);
+  //@ loop_invariant (gv_consume == true ? true : (gv_beforeloop == true ? gv_tok_prev == tok : gv_tok_prev != tok));
+  {
+    tok = *rest;
+    gv_tok_prev = tok;
+    gv_beforeloop = false;
+
+    if (!first)
+      tok = skip(tok, str_comma());
+    first = false;
+
+    *rest = tok;
+    Type *ty = declarator(rest, tok, tok, basety, scope);
+    tok = *rest;
+    if (ty_name(ty) == NULL) {
+      tydef_name_error();
+      gv_unreachable();
+    }
+    VarScope *tmp = push_scope(scope, ty_name(ty));
+    tmp->type_def = ty;
+
+    gv_consume = consume(rest, tok, str_semicolon());
+  }
+  tok = *rest;
+  return tok;
+}
+
+void create_param_lvars(Scope *scope, Obj **locals, Type *param) {
+  if (param != NULL) {
+    create_param_lvars(scope, locals, param->next);
+    if (ty_name(param) == NULL)
+      param_name_error();
+    new_lvar(scope, locals, ty_name(param), param);
+  }
+}
+
+Obj *find_func(Scope *scope, StringList *name) {
+  Scope *sc = scope;
+  while (sc->next != NULL)
+    sc = sc->next;
+
+  VarScope *sc2 = varscopemap_get(sc->vars, name);
+  if (sc2 != NULL && sc2->var != NULL && sc2->var->is_function)
+    return sc2->var;
+  return NULL;
+}
+
+Token *functionp(Token *tok, Type *basety, VarAttr *attr, Scope **scope, Obj **globals) {
+  Token **rst = alloc(Token*);
+  *rst = tok;
+  Type *ty = declarator(rst, tok, tok, basety, *scope);
+  tok = *rst;
+
+  if (ty_name(ty) == NULL)
+    func_name_error();
+  StringList *name_str = ty_name(ty);
+
+  Obj *fn = find_func(*scope, name_str);
+  if (fn != NULL) {
+    if (!fn->is_function)
+      func_redecl_error();
+    if (fn->is_definition && equal(tok, str_obracket()))
+      func_redef_error();
+    fn->is_definition = fn->is_definition || equal(tok, str_obracket());
+  } else {
+    fn = new_gvar(*scope, globals, name_str, ty);
+    fn->is_function = true;
+    fn->is_definition = equal(tok, str_obracket());
+  }
+
+  Token **rest = alloc(Token*);
+  *rest = tok;
+  if (consume(rest, tok, str_semicolon())) {
+    tok = *rest;
+    return tok;
+  }
+  tok = *rest;
+
+  Obj **locals = alloc(Obj*);
+  *locals = NULL;
+  enter_scope(scope);
+  create_param_lvars(*scope, locals, ty->params);
+
+  fn->params = *locals;
+
+  tok = skip(tok, str_obracket());
+
+  *rest = tok;
+  fn->body = compound_stmt(rest, tok, scope, globals, locals);
+  tok = *rest;
+  fn->locals = *locals;
+  leave_scope(scope);
+  return tok;
+}
+
+bool is_function(Token *tok, Scope *scope) {
+  if (equal(tok, str_semicolon()))
+    return false;
+
+  Type *dummy = empty_type();
+  Token **rest = alloc(Token*);
+  *rest = tok;
+  Type *ty = declarator(rest, tok, tok, dummy, scope);
+  return is_FUNC(ty);
+}
+
+Obj *parse(Token *tok)
+//@ requires ? && tokenList(tok); // ? for missing perms from sub-fields in token list, like StringList/Type
+//@ ensures ?; // ? for missing AST predicate
+{
+  Scope *scope = new_scope();
+  Scope **scptr = alloc(Scope*);
+  *scptr = scope;
+
+  Obj **gblsptr = alloc(Obj*);
+  *gblsptr = NULL;
+
+  //@ unfold tokenList(tok);
+  //@ unfold tokenListSeg(tok, NULL);
+  Token *gv_tok = tok;
+  bool gv_beforeloop = true;
+  //@ fold tokenListSeg(gv_tok, tok);
+  while (!is_EOF(tok))
+  //@ loop_invariant ? && acc(tok->next) && tokenListSeg(tok->next, NULL);
+  //@ loop_invariant tokenListSeg(gv_tok, tok) && (gv_beforeloop == true ? true : gv_tok != tok);
+  {
+    gv_tok = tok;
+    gv_beforeloop = false;
+
+    VarAttr *attr = new_attr();
+
+    Token *prev_tok = tok;
+
+    Token **rest = alloc(Token*);
+    *rest = tok;
+    //@ fold tokenListSeg(tok,NULL);
+    Type *basety = declspec(rest, tok, tok, attr, *scptr);
+    tok = *rest;
+    if (attr->is_typedef) {
+      tok = parse_typedef(tok, basety, *scptr);
+    } else if (is_function(tok, *scptr)) {
+      tok = functionp(tok, basety, attr, scptr, gblsptr);
+    }
+
+    if (prev_tok == tok) {
+      no_progress_error();
+      gv_unreachable();
+    }
+  }
+
+  //@ assert endOfFile(tok);
+
+  return *gblsptr;
+}
+
+//-------------Testing-----------------------
+
+void print_str_list(StringList *str) {
+  if (str != NULL) {
+    CharNode *cur = str->root;
+    int i = 0;
+    for (i ; i < get_len(str) ; i = i + 1) {
+      printchar(cur->val);
+      cur = cur->next;
+    }
+    printchar(cur->val);
+  }
+}
+
+void print_tokens(Token *tlist) {
+  Token *cur = tlist;
+  while (cur != NULL) {
+    print_str_list(tok_name(cur));
+    if (equals(tok_name(cur), str_semicolon()) ||
+        equals(tok_name(cur), str_obracket())  ||
+        equals(tok_name(cur), str_cbracket())
+        ) {
+      printchar('\n');
+    } else {
+      printchar(' ');
+    }
+    cur = cur->next;
+  }
+}
+
+void print_nodes(ASTNode *nlist, bool rep) {
+  ASTNode *cur = nlist;
+  if (cur == NULL) {
+  } else if (rep) {
+    while (cur != NULL) {
+      printchar('r');
+      printchar('e');
+      printchar('p');
+      printchar(':');
+      printchar(' ');
+      print_str_list(tok_name(cur->tok));
+      printchar('\n');
+
+      print_nodes(cur->lhs, false);
+      print_nodes(cur->rhs, false);
+      print_nodes(cur->cond, false);
+      print_nodes(cur->then, false);
+      print_nodes(cur->els, false);
+      print_nodes(cur->init, false);
+      print_nodes(cur->inc, false);
+      for (ASTNode *n = cur->body; n != NULL; n = n->next)
+        print_nodes(n, false);
+      for (ASTNode *n = cur->args; n != NULL; n = n->next)
+        print_nodes(n, false);
+
+      cur = cur->next;
+    }
+  } else {
+    print_str_list(tok_name(cur->tok));
+    if (equals(tok_name(cur->tok), str_semicolon())) {
+      printchar('\n');
+    } else {
+      printchar(' ');
+    }
+    print_nodes(cur->lhs, false);
+    print_nodes(cur->rhs, false);
+    print_nodes(cur->cond, false);
+    print_nodes(cur->then, false);
+    print_nodes(cur->els, false);
+    print_nodes(cur->init, false);
+    print_nodes(cur->inc, false);
+    for (ASTNode *n = cur->body; n != NULL; n = n->next)
+      print_nodes(n, false);
+    for (ASTNode *n = cur->args; n != NULL; n = n->next)
+      print_nodes(n, false);
+  }
+}
+
+Token *tok_ident(char c) {
+  StringList *id_str = new_stringlist();
+  add_char(id_str, c);
+  return new_token(new_TK_IDENT(), id_str);
+}
+
+Token *nums(Token *tlist) {
+
+  StringList *n1 = new_stringlist();
+  add_char(n1, '4');
+  add_char(n1, '2');
+
+  StringList *n2 = new_stringlist();
+  add_char(n2, '2');
+  add_char(n2, '3');
+  add_char(n2, '9');
+
+  StringList *f1 = new_stringlist();
+  add_char(f1, '2');
+  add_char(f1, '.');
+  add_char(f1, '8');
+  add_char(f1, '4');
+
+  StringList *f2 = new_stringlist();
+  add_char(f2, '0');
+  add_char(f2, '.');
+  add_char(f2, '0');
+  add_char(f2, '0');
+  add_char(f2, '0');
+
+  tlist->next = new_token(new_TK_KEYWORD(), str_int());
+  tlist->next->next = tok_ident('x');
+  tlist->next->next->next = new_token(new_TK_PUNCT(), str_comma());
+  tlist->next->next->next->next = tok_ident('y');
+  tlist->next->next->next->next->next = new_token(new_TK_PUNCT(), str_semicolon());
+
+  Token *stmt1 = tlist->next->next->next->next->next;
+
+  stmt1->next = tok_ident('y');
+  stmt1->next->next = new_token(new_TK_PUNCT(), str_eq());
+  stmt1->next->next->next = new_token(new_TK_NUM(), n1);
+  stmt1->next->next->next->ty = new_ty_int();
+  stmt1->next->next->next->next = new_token(new_TK_PUNCT(), str_semicolon());
+  Token *stmt2 = stmt1->next->next->next->next;
+
+  stmt2->next = tok_ident('x');
+  stmt2->next->next = new_token(new_TK_PUNCT(), str_eq());
+  stmt2->next->next->next = tok_ident('y');
+  stmt2->next->next->next->next = new_token(new_TK_PUNCT(), str_semicolon());
+  Token *stmt3 = stmt2->next->next->next->next;
+
+  stmt3->next = tok_ident('x');
+  stmt3->next->next = new_token(new_TK_PUNCT(), str_eq());
+  stmt3->next->next->next = new_token(new_TK_NUM(), n1);
+  stmt3->next->next->next->ty = new_ty_int();
+  stmt3->next->next->next->next = new_token(new_TK_PUNCT(), str_add());
+  stmt3->next->next->next->next->next = new_token(new_TK_NUM(), n2);
+  stmt3->next->next->next->next->next->ty = new_ty_int();
+  stmt3->next->next->next->next->next->next = new_token(new_TK_PUNCT(), str_sub());
+  stmt3->next->next->next->next->next->next->next = tok_ident('y');
+  stmt3->next->next->next->next->next->next->next->next = new_token(new_TK_PUNCT(), str_semicolon());
+  Token *stmt4 = stmt3->next->next->next->next->next->next->next->next;
+
+  stmt4->next = tok_ident('y');
+  stmt4->next->next = new_token(new_TK_PUNCT(), str_eq());
+  stmt4->next->next->next = new_token(new_TK_PUNCT(), str_sub());
+  stmt4->next->next->next->next = tok_ident('x');
+  stmt4->next->next->next->next->next = new_token(new_TK_PUNCT(), str_semicolon());
+  Token *stmt5 = stmt4->next->next->next->next->next;
+
+  stmt5->next = tok_ident('y');
+  stmt5->next->next = new_token(new_TK_PUNCT(), str_eq());
+  stmt5->next->next->next = tok_ident('x');
+  stmt5->next->next->next->next = new_token(new_TK_PUNCT(), str_bitshl());
+  stmt5->next->next->next->next->next = new_token(new_TK_NUM(), n1);
+  stmt5->next->next->next->next->next->ty = new_ty_int();
+  stmt5->next->next->next->next->next->next = new_token(new_TK_PUNCT(), str_semicolon());
+  Token *stmt6 = stmt5->next->next->next->next->next->next;
+
+  stmt6->next = tok_ident('y');
+  stmt6->next->next = new_token(new_TK_PUNCT(), str_eq());
+  stmt6->next->next->next = tok_ident('x');
+  stmt6->next->next->next->next = new_token(new_TK_PUNCT(), str_bitshr());
+  stmt6->next->next->next->next->next = new_token(new_TK_PUNCT(), str_sub());
+  stmt6->next->next->next->next->next->next = new_token(new_TK_NUM(), n2);
+  stmt6->next->next->next->next->next->next->ty = new_ty_int();
+  stmt6->next->next->next->next->next->next->next = new_token(new_TK_PUNCT(), str_semicolon());
+  Token *stmt7 = stmt6->next->next->next->next->next->next->next;
+
+  stmt7->next = tok_ident('x');
+  stmt7->next->next = new_token(new_TK_PUNCT(), str_eq());
+  stmt7->next->next->next = new_token(new_TK_PUNCT(), str_bitnot());
+  stmt7->next->next->next->next = new_token(new_TK_PUNCT(), str_oparen());
+  stmt7->next->next->next->next->next = tok_ident('y');
+  stmt7->next->next->next->next->next->next = new_token(new_TK_PUNCT(), str_bitand());
+  stmt7->next->next->next->next->next->next->next = tok_ident('x');
+  stmt7->next->next->next->next->next->next->next->next = new_token(new_TK_PUNCT(), str_cparen());
+  stmt7->next->next->next->next->next->next->next->next->next = new_token(new_TK_PUNCT(), str_semicolon());
+  Token *stmt8 = stmt7->next->next->next->next->next->next->next->next->next;
+
+  stmt8->next = new_token(new_TK_KEYWORD(), str_float());
+  stmt8->next->next = tok_ident('a');
+  stmt8->next->next->next = new_token(new_TK_PUNCT(), str_comma());
+  stmt8->next->next->next->next = tok_ident('b');
+  stmt8->next->next->next->next->next = new_token(new_TK_PUNCT(), str_comma());
+  stmt8->next->next->next->next->next->next = tok_ident('c');
+  stmt8->next->next->next->next->next->next->next = new_token(new_TK_PUNCT(), str_semicolon());
+  Token *stmt9 = stmt8->next->next->next->next->next->next->next;
+
+  stmt9->next = tok_ident('b');
+  stmt9->next->next = new_token(new_TK_PUNCT(), str_eq());
+  stmt9->next->next->next = new_token(new_TK_NUM(), f1);
+  stmt9->next->next->next->ty = new_ty_double();
+  stmt9->next->next->next->next = new_token(new_TK_PUNCT(), str_mul());
+  stmt9->next->next->next->next->next = new_token(new_TK_NUM(), f2);
+  stmt9->next->next->next->next->next->ty = new_ty_double();
+  stmt9->next->next->next->next->next->next = new_token(new_TK_PUNCT(), str_semicolon());
+  Token *stmt10 = stmt9->next->next->next->next->next->next;
+
+  stmt10->next = tok_ident('c');
+  stmt10->next->next = new_token(new_TK_PUNCT(), str_eq());
+  stmt10->next->next->next = new_token(new_TK_NUM(), f1);
+  stmt10->next->next->next->ty = new_ty_double();
+  stmt10->next->next->next->next = new_token(new_TK_PUNCT(), str_mod());
+  stmt10->next->next->next->next->next = new_token(new_TK_NUM(), f2);
+  stmt10->next->next->next->next->next->ty = new_ty_double();
+  stmt10->next->next->next->next->next->next = new_token(new_TK_PUNCT(), str_semicolon());
+  Token *stmt11 = stmt10->next->next->next->next->next->next;
+
+  stmt11->next = tok_ident('a');
+  stmt11->next->next = new_token(new_TK_PUNCT(), str_eq());
+  stmt11->next->next->next = tok_ident('b');
+  stmt11->next->next->next->next = new_token(new_TK_PUNCT(), str_div());
+  stmt11->next->next->next->next->next = tok_ident('c');
+  stmt11->next->next->next->next->next->next = new_token(new_TK_PUNCT(), str_semicolon());
+  Token *end = stmt11->next->next->next->next->next->next;
+
+  return end;
+}
+
+Token *bools(Token *tlist) {
+
+  tlist->next = new_token(new_TK_KEYWORD(), str_bool());
+  tlist->next->next = tok_ident('b');
+  tlist->next->next->next = new_token(new_TK_PUNCT(), str_semicolon());
+  Token *stmt1 = tlist->next->next->next;
+
+  stmt1->next = new_token(new_TK_KEYWORD(), str_bool());
+  stmt1->next->next = tok_ident('c');
+  stmt1->next->next->next = new_token(new_TK_PUNCT(), str_semicolon());
+  Token *stmt2 = stmt1->next->next->next;
+
+  stmt2->next = new_token(new_TK_KEYWORD(), str_bool());
+  stmt2->next->next = tok_ident('d');
+  stmt2->next->next->next = new_token(new_TK_PUNCT(), str_semicolon());
+  Token *stmt3 = stmt2->next->next->next;
+
+  stmt3->next = tok_ident('b');
+  stmt3->next->next = new_token(new_TK_PUNCT(), str_eq());
+  stmt3->next->next->next = tok_ident('c');
+  stmt3->next->next->next->next = new_token(new_TK_PUNCT(), str_logeq());
+  stmt3->next->next->next->next->next = tok_ident('d');
+  stmt3->next->next->next->next->next->next = new_token(new_TK_PUNCT(), str_semicolon());
+  Token *stmt4 = stmt3->next->next->next->next->next->next;
+
+  stmt4->next = tok_ident('b');
+  stmt4->next->next = new_token(new_TK_PUNCT(), str_eq());
+  stmt4->next->next->next = tok_ident('c');
+  stmt4->next->next->next->next = new_token(new_TK_PUNCT(), str_le());
+  stmt4->next->next->next->next->next = tok_ident('d');
+  stmt4->next->next->next->next->next->next = new_token(new_TK_PUNCT(), str_semicolon());
+  Token *stmt5 = stmt4->next->next->next->next->next->next;
+
+  stmt5->next = tok_ident('b');
+  stmt5->next->next = new_token(new_TK_PUNCT(), str_eq());
+  stmt5->next->next->next = tok_ident('c');
+  stmt5->next->next->next->next = new_token(new_TK_PUNCT(), str_lt());
+  stmt5->next->next->next->next->next = tok_ident('d');
+  stmt5->next->next->next->next->next->next = new_token(new_TK_PUNCT(), str_semicolon());
+  Token *stmt6 = stmt5->next->next->next->next->next->next;
+
+  stmt6->next = tok_ident('b');
+  stmt6->next->next = new_token(new_TK_PUNCT(), str_eq());
+  stmt6->next->next->next = tok_ident('c');
+  stmt6->next->next->next->next = new_token(new_TK_PUNCT(), str_ge());
+  stmt6->next->next->next->next->next = tok_ident('d');
+  stmt6->next->next->next->next->next->next = new_token(new_TK_PUNCT(), str_semicolon());
+  Token *stmt7 = stmt6->next->next->next->next->next->next;
+
+  stmt7->next = tok_ident('b');
+  stmt7->next->next = new_token(new_TK_PUNCT(), str_eq());
+  stmt7->next->next->next = tok_ident('c');
+  stmt7->next->next->next->next = new_token(new_TK_PUNCT(), str_gt());
+  stmt7->next->next->next->next->next = tok_ident('d');
+  stmt7->next->next->next->next->next->next = new_token(new_TK_PUNCT(), str_semicolon());
+  Token *stmt8 = stmt7->next->next->next->next->next->next;
+
+  stmt8->next = tok_ident('b');
+  stmt8->next->next = new_token(new_TK_PUNCT(), str_eq());
+  stmt8->next->next->next = tok_ident('c');
+  stmt8->next->next->next->next = new_token(new_TK_PUNCT(), str_logand());
+  stmt8->next->next->next->next->next = tok_ident('d');
+  stmt8->next->next->next->next->next->next = new_token(new_TK_PUNCT(), str_semicolon());
+  Token *stmt9 = stmt8->next->next->next->next->next->next;
+
+  stmt9->next = tok_ident('b');
+  stmt9->next->next = new_token(new_TK_PUNCT(), str_eq());
+  stmt9->next->next->next = new_token(new_TK_PUNCT(), str_lognot());
+  stmt9->next->next->next->next = tok_ident('c');
+  stmt9->next->next->next->next->next = new_token(new_TK_PUNCT(), str_semicolon());
+  Token *stmt10 = stmt9->next->next->next->next->next;
+
+  stmt10->next = tok_ident('b');
+  stmt10->next->next = new_token(new_TK_PUNCT(), str_eq());
+  stmt10->next->next->next = tok_ident('c');
+  stmt10->next->next->next->next = new_token(new_TK_PUNCT(), str_logneq());
+  stmt10->next->next->next->next->next = tok_ident('d');
+  stmt10->next->next->next->next->next->next = new_token(new_TK_PUNCT(), str_semicolon());
+  Token *end = stmt10->next->next->next->next->next->next;
+
+  return end;
+}
+
+Token *pointerss(Token *tlist) {
+
+  tlist->next = new_token(new_TK_PUNCT(), str_mul());
+  tlist->next->next = new_token(new_TK_PUNCT(), str_bitand());
+  tlist->next->next->next = tok_ident('x');
+  tlist->next->next->next->next = new_token(new_TK_PUNCT(), str_semicolon());
+  Token *stmt1 = tlist->next->next->next->next;
+
+  stmt1->next = new_token(new_TK_KEYWORD(), str_int());
+  stmt1->next->next = new_token(new_TK_PUNCT(), str_mul());
+  stmt1->next->next->next = tok_ident('l');
+  stmt1->next->next->next->next = new_token(new_TK_PUNCT(), str_semicolon());
+  Token *stmt2 = stmt1->next->next->next->next;
+
+  stmt2->next = new_token(new_TK_PUNCT(), str_mul());
+  stmt2->next->next = tok_ident('l');
+  stmt2->next->next->next = new_token(new_TK_PUNCT(), str_eq());
+  stmt2->next->next->next->next = new_token(new_TK_PUNCT(), str_bitand());
+  stmt2->next->next->next->next->next = tok_ident('x');
+  stmt2->next->next->next->next->next->next = new_token(new_TK_PUNCT(), str_semicolon());
+  Token *stmt3 = stmt2->next->next->next->next->next->next;
+
+  stmt3->next = new_token(new_TK_KEYWORD(), str_int());
+  stmt3->next->next = new_token(new_TK_PUNCT(), str_mul());
+  stmt3->next->next->next = new_token(new_TK_PUNCT(), str_mul());
+  stmt3->next->next->next->next = tok_ident('z');
+  stmt3->next->next->next->next->next = new_token(new_TK_PUNCT(), str_semicolon());
+  Token *stmt4 = stmt3->next->next->next->next->next;
+
+  stmt4->next = new_token(new_TK_PUNCT(), str_mul());
+  stmt4->next->next = new_token(new_TK_PUNCT(), str_mul());
+  stmt4->next->next->next = tok_ident('z');
+  stmt4->next->next->next->next = new_token(new_TK_PUNCT(), str_eq());
+  stmt4->next->next->next->next->next = new_token(new_TK_PUNCT(), str_bitand());
+  stmt4->next->next->next->next->next->next = tok_ident('y');
+  stmt4->next->next->next->next->next->next->next = new_token(new_TK_PUNCT(), str_semicolon());
+  Token *stmt5 = stmt4->next->next->next->next->next->next->next;
+
+  stmt5->next = new_token(new_TK_PUNCT(), str_mul());
+  stmt5->next->next = new_token(new_TK_PUNCT(), str_mul());
+  stmt5->next->next->next = tok_ident('z');
+  stmt5->next->next->next->next = new_token(new_TK_PUNCT(), str_semicolon());
+  Token *end = stmt5->next->next->next->next;
+
+  return end;
+}
+
+Token *whiles(Token *tlist) {
+    StringList *one = new_stringlist();
+    add_char(one, '1');
+
+    tlist->next = new_token(new_TK_KEYWORD(), str_while());
+    tlist->next->next = new_token(new_TK_PUNCT(), str_oparen());
+    tlist->next->next->next = tok_ident('p');
+    tlist->next->next->next->next = new_token(new_TK_PUNCT(), str_gt());
+    tlist->next->next->next->next->next = new_token(new_TK_NUM(), one);
+    tlist->next->next->next->next->next->ty = new_ty_int();
+    tlist->next->next->next->next->next->next = new_token(new_TK_PUNCT(), str_cparen());
+    tlist->next->next->next->next->next->next->next = new_token(new_TK_PUNCT(), str_obracket());
+    Token *tmp = tlist->next->next->next->next->next->next->next;
+
+    tmp = bools(tmp);
+
+    tmp->next = new_token(new_TK_PUNCT(), str_cbracket());
+  return tmp->next;
+}
+
+Token *ifstmt(Token *tlist) {
+  StringList *one = new_stringlist();
+  add_char(one, '1');
+  StringList *two = new_stringlist();
+  add_char(two, '2');
+
+  tlist->next = new_token(new_TK_KEYWORD(), str_if());
+  tlist->next->next = new_token(new_TK_PUNCT(), str_oparen());
+  tlist->next->next->next = tok_ident('p');
+  tlist->next->next->next->next = new_token(new_TK_PUNCT(), str_le());
+  tlist->next->next->next->next->next = new_token(new_TK_NUM(), one);
+  tlist->next->next->next->next->next->ty = new_ty_int();
+  tlist->next->next->next->next->next->next = new_token(new_TK_PUNCT(), str_cparen());
+  tlist->next->next->next->next->next->next->next = new_token(new_TK_PUNCT(), str_obracket());
+  Token *tmp = tlist->next->next->next->next->next->next->next;
+
+    tmp = whiles(tmp);
+
+    tmp->next = new_token(new_TK_KEYWORD(), str_return());
+    tmp->next->next = new_token(new_TK_NUM(), one);
+    tmp->next->next->ty = new_ty_int();
+    tmp->next->next->next = new_token(new_TK_PUNCT(), str_semicolon());
+    Token *elsee = tmp->next->next->next;
+
+    elsee->next = new_token(new_TK_PUNCT(), str_cbracket());
+    elsee->next->next = new_token(new_TK_KEYWORD(), str_else());
+    elsee->next->next->next = new_token(new_TK_PUNCT(), str_obracket());
+    Token *ret2 = elsee->next->next->next;
+
+    ret2->next = new_token(new_TK_KEYWORD(), str_return());
+    ret2->next->next = tok_ident('f');
+    ret2->next->next->next = new_token(new_TK_PUNCT(), str_oparen());
+    ret2->next->next->next->next = tok_ident('p');
+    ret2->next->next->next->next->next = new_token(new_TK_PUNCT(), str_sub());
+    ret2->next->next->next->next->next->next = new_token(new_TK_NUM(), one);
+    ret2->next->next->next->next->next->next->ty = new_ty_int();
+    ret2->next->next->next->next->next->next->next = new_token(new_TK_PUNCT(), str_cparen());
+    Token *retp = ret2->next->next->next->next->next->next->next;
+
+    retp->next = new_token(new_TK_PUNCT(), str_add());
+    retp->next->next = tok_ident('f');
+    retp->next->next->next = new_token(new_TK_PUNCT(), str_oparen());
+    retp->next->next->next->next = tok_ident('p');
+    retp->next->next->next->next->next = new_token(new_TK_PUNCT(), str_sub());
+    retp->next->next->next->next->next->next = new_token(new_TK_NUM(), two);
+    retp->next->next->next->next->next->next->ty = new_ty_int();
+    retp->next->next->next->next->next->next->next = new_token(new_TK_PUNCT(), str_cparen());
+    retp->next->next->next->next->next->next->next->next = new_token(new_TK_PUNCT(), str_semicolon());
+    Token *end = retp->next->next->next->next->next->next->next->next;
+
+  end->next = new_token(new_TK_PUNCT(), str_cbracket());
+  return end->next;
+}
+
+
+Token *functions(Token *tlist) {
+  tlist->next = new_token(new_TK_KEYWORD(), str_int());
+  tlist->next->next = tok_ident('f');
+  tlist->next->next->next = new_token(new_TK_PUNCT(), str_oparen());
+  tlist->next->next->next->next = new_token(new_TK_KEYWORD(), str_int());
+  tlist->next->next->next->next->next = tok_ident('p');
+  tlist->next->next->next->next->next->next = new_token(new_TK_PUNCT(), str_cparen());
+  tlist->next->next->next->next->next->next->next = new_token(new_TK_PUNCT(), str_obracket());
+  Token *tmp = tlist->next->next->next->next->next->next->next;
+
+  tmp = nums(tmp);
+
+  tmp = pointerss(tmp);
+
+  tmp = ifstmt(tmp);
+
+  tmp->next = new_token(new_TK_PUNCT(), str_cbracket());
+  return tmp->next;
+}
+
+int main() {
+  Token *start = new_token(new_TK_KEYWORD(), str_typedef());
+  start->next = new_token(new_TK_KEYWORD(), str_int());
+  start->next->next = tok_ident('t');
+  start->next->next->next = new_token(new_TK_PUNCT(), str_semicolon());
+
+  Token *tmp = functions(start->next->next->next);
+
+  tmp->next = new_token(new_TK_EOF(), NULL);
+
+  print_tokens(start);
+  Obj *globals = parse(start);
+
+  while (globals != NULL) {
+    if (globals->is_function) {
+      printchar('f');
+      printchar('u');
+      printchar('n');
+      printchar('c');
+      printchar(':');
+      printchar(' ');
+      print_str_list(globals->name);
+      printchar(' ');
+      printchar('w');
+      printchar('/');
+      printchar(' ');
+      printchar('p');
+      printchar('a');
+      printchar('r');
+      printchar('a');
+      printchar('m');
+      printchar('s');
+      printchar(':');
+      printchar(' ');
+      Obj *params = globals->params;
+      while (params != NULL) {
+        if (params->ty == NULL)
+          param_type_error();
+        print_str_list(params->name);
+        printchar(' ');
+        params = params->next;
+      }
+      printchar('\n');
+      print_nodes(globals->body, true);
+    }
+    globals = globals->next;
+  }
+
+  return 0;
+}
