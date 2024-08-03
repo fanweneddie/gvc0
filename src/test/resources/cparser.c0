@@ -1,5 +1,9 @@
 // This is the most recent cparser file, copied from
 // https://github.com/gradual-verification/gvc0-cparser-case-study/blob/main/verification-data/journal-entry-35-100323-0223-100323-0635/cparser-2023-10-04T02%3A10%3A53.288129/cparser.c0
+//
+// In order to survive the early-return check in new version of gvc0,
+// I add some else statements or "placeholder" ret variables to eliminate early return
+// (See comment: "to disable early return").
 
 #use <conio>
 #use <parser_errors>
@@ -87,8 +91,9 @@ bool equals(StringList *s1, StringList *s2) {
     eq = eq && c1->val == '\0';
     eq = eq && c2->val == '\0';
     return eq;
+  } else { // to disable early return
+    return false;
   }
-  return false;
 }
 
 int get_len(StringList *s) {
@@ -347,9 +352,10 @@ bool consume(Token **rest, Token *tok, StringList *str) {
   if (equal(tok, str)) {
     *rest = tok->next;
     return true;
+  } else { // to disable early return
+    *rest = tok;
+    return false;
   }
-  *rest = tok;
-  return false;
 }
 
 StringList *tok_name(Token *tok) {
@@ -1740,21 +1746,31 @@ Obj *new_gvar(Scope *scope, Obj **globals, StringList *name, Type *ty) {
 
 VarScope *find_var(Token *tok, Scope *scope)
 {
-  for (Scope *sc = scope; sc != NULL; sc = sc->next) {
+  // to disable early return
+  VarScope *ret = NULL;
+  bool break_loop = false;
+  for (Scope *sc = scope; sc != NULL && !break_loop; sc = sc->next) {
     VarScope *sc2 = varscopemap_get(sc->vars, tok_name(tok));
-    if (sc2 != NULL)
-      return sc2;
+    if (sc2 != NULL) {
+      ret = sc2;
+      break_loop = true;
+    }
   }
-  return NULL;
+  return ret;
 }
 
 Type *find_tag(Token *tok, Scope *scope) {
-  for (Scope *sc = scope; sc != NULL; sc = sc->next) {
+  // to disable early return
+  Type *ret = NULL;
+  bool break_loop = false;
+  for (Scope *sc = scope; sc != NULL && !break_loop; sc = sc->next) {
     Type *ty = tagscopemap_get(sc->tags, tok_name(tok));
-    if (ty != NULL)
-      return ty;
+    if (ty != NULL) {
+      ret = ty;
+      break_loop = true;
+    }
   }
-  return NULL;
+  return ret;
 }
 
 ASTNode *logor(Token **rest, Token *tok, Scope *scope) {
@@ -2317,12 +2333,14 @@ ASTNode *declaration(Token **rest, Token *tok, Type *basety, VarAttr *attr, Scop
 }
 
 Type *find_typedef(Token *tok, Scope *scope) {
+  // to disable early return
+  Type *ret = NULL;
   if (is_IDENT(tok)) {
     VarScope *sc = find_var(tok, scope);
     if (sc != NULL)
-      return sc->type_def;
+      ret = sc->type_def;
   }
-  return NULL;
+  return ret;
 }
 
 bool is_typename(Token *tok, Scope *scope)
@@ -2558,46 +2576,49 @@ Type *func_params(Token **rest, Token *tok, Token *gv_tok, Type *ty, Scope *scop
   if (equal(tok, str_void()) && equal(tok->next, str_cparen())) {
     *rest = tok->next->next;
     return func_type(ty);
-  }
+  } else { // to disable early return
 
-  Type *head = empty_type();
-  Type *cur = head;
-  Token **rst = alloc(Token*);
+    Type *head = empty_type();
+    Type *cur = head;
+    Token **rst = alloc(Token*);
 
-  while (!equal(tok, str_cparen())) {
-    if (cur != head)
-      tok = skip(tok, str_comma());
+    while (!equal(tok, str_cparen())) {
+      if (cur != head)
+        tok = skip(tok, str_comma());
 
-    *rst = tok;
-    Type *ty2 = declspec(rst, tok, tok, NULL, scope);
-    tok = *rst;
-    ty2 = declarator(rst, tok, tok, ty2, scope);
-    tok = *rst;
+      *rst = tok;
+      Type *ty2 = declspec(rst, tok, tok, NULL, scope);
+      tok = *rst;
+      ty2 = declarator(rst, tok, tok, ty2, scope);
+      tok = *rst;
 
-    if (is_FUNC(ty2)) {
-      func_as_arg_error();
+      if (is_FUNC(ty2)) {
+        func_as_arg_error();
+      }
+
+      cur->next = copy_type(ty2);
+      cur = cur->next;
     }
 
-    cur->next = copy_type(ty2);
-    cur = cur->next;
+    ty = func_type(ty);
+    ty->params = head->next;
+    *rest = tok->next;
+    return ty;
   }
-
-  ty = func_type(ty);
-  ty->params = head->next;
-  *rest = tok->next;
-  return ty;
 }
 
 Type *type_suffix(Token **rest, Token *tok, Type *ty, Scope *scope)
 //@ requires ? && acc(*rest) && tokenListSeg(tok, NULL);
 //@ ensures ? && acc(*rest) && tokenListSeg(tok, *rest) && tokenListSeg(*rest, NULL);
 {
-  if (equal(tok, str_oparen()))
+  if (equal(tok, str_oparen())) { // to disable early return
     //@ unfold tokenListSeg(tok,NULL);
     return func_params(rest, tok->next, tok->next, ty, scope);
+  } else {
 
-  *rest = tok;
-  return ty;
+    *rest = tok;
+    return ty;
+  }
 }
 
 Type *pointers(Token **rest, Token *tok, Token *gv_tok, Type *ty)
@@ -2753,7 +2774,8 @@ Obj *find_func(Scope *scope, StringList *name) {
   VarScope *sc2 = varscopemap_get(sc->vars, name);
   if (sc2 != NULL && sc2->var != NULL && sc2->var->is_function)
     return sc2->var;
-  return NULL;
+  else // to disable early return
+    return NULL;
 }
 
 Token *functionp(Token *tok, Type *basety, VarAttr *attr, Scope **scope, Obj **globals) {
@@ -2784,35 +2806,37 @@ Token *functionp(Token *tok, Type *basety, VarAttr *attr, Scope **scope, Obj **g
   if (consume(rest, tok, str_semicolon())) {
     tok = *rest;
     return tok;
+  } else { // to disable early return
+    tok = *rest;
+
+    Obj **locals = alloc(Obj*);
+    *locals = NULL;
+    enter_scope(scope);
+    create_param_lvars(*scope, locals, ty->params);
+
+    fn->params = *locals;
+
+    tok = skip(tok, str_obracket());
+
+    *rest = tok;
+    fn->body = compound_stmt(rest, tok, scope, globals, locals);
+    tok = *rest;
+    fn->locals = *locals;
+    leave_scope(scope);
+    return tok;
   }
-  tok = *rest;
-
-  Obj **locals = alloc(Obj*);
-  *locals = NULL;
-  enter_scope(scope);
-  create_param_lvars(*scope, locals, ty->params);
-
-  fn->params = *locals;
-
-  tok = skip(tok, str_obracket());
-
-  *rest = tok;
-  fn->body = compound_stmt(rest, tok, scope, globals, locals);
-  tok = *rest;
-  fn->locals = *locals;
-  leave_scope(scope);
-  return tok;
 }
 
 bool is_function(Token *tok, Scope *scope) {
   if (equal(tok, str_semicolon()))
     return false;
-
-  Type *dummy = empty_type();
-  Token **rest = alloc(Token*);
-  *rest = tok;
-  Type *ty = declarator(rest, tok, tok, dummy, scope);
-  return is_FUNC(ty);
+  else { // to disable early return
+    Type *dummy = empty_type();
+    Token **rest = alloc(Token*);
+    *rest = tok;
+    Type *ty = declarator(rest, tok, tok, dummy, scope);
+    return is_FUNC(ty);
+  }
 }
 
 Obj *parse(Token *tok)
